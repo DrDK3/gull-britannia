@@ -76,7 +76,16 @@ func _ready() -> void:
 # --------------------------------------------------------------------------
 
 func _parse_cmdline() -> void:
-	for arg in OS.get_cmdline_user_args():
+	var args: Array = Array(OS.get_cmdline_user_args())
+	# In a browser, the same switches can be given as URL parameters,
+	# e.g. index.html?mission=m1&skip-briefing
+	if OS.has_feature("web"):
+		var js: Object = Engine.get_singleton("JavaScriptBridge")
+		if js != null:
+			var q := str(js.call("eval", "window.location.search", true))
+			for part in q.trim_prefix("?").split("&", false):
+				args.append("--" + str(part).uri_decode())
+	for arg in args:
 		var a: String = arg
 		if a.begins_with("--"):
 			a = a.substr(2)

@@ -12,6 +12,14 @@ A single-player, first-person seagull stealth game set in an alternate-history D
 
 More screenshots, all captured from the game itself, are in [`docs/screenshots/`](docs/screenshots).
 
+## Play in your browser
+
+**https://drdk3.github.io/gull-britannia/**
+
+It runs in any desktop browser with WebGL 2 (Chrome, Edge, Firefox or Safari), with keyboard and mouse. The first load downloads about 40 MB. Click the game window once and the mouse is captured for steering. Press Esc to release it and pause. Progress saves in the browser.
+
+To rebuild the web version after changing the game, run `tools/build_web.sh`. It uses the `Web` export preset, which is single-threaded so it works on any static host. Then publish the contents of `build/web` to the `gh-pages` branch.
+
 ## Launching
 
 1. Install Godot 4.7.x from <https://godotengine.org/download> (the standard build, not .NET).
@@ -36,7 +44,10 @@ Put these after `--`, for example `godot --path . -- --mission=m1 --skip-briefin
 | `--unlock-all` | List every playable operation as unlocked. |
 | `--fresh-progress` | Ignore saved progress and don't write any. |
 | `--no-music` | Skip music synthesis. |
+| `--trace` | Print timing and debug traces. |
 | `--autotest=all` | Run the automated checks and quit (see Testing). |
+
+In the browser build, the same switches work as URL parameters, for example `index.html?mission=m1&skip-briefing`.
 
 ## Controls
 
@@ -146,7 +157,8 @@ The automated runs drive the real systems with scripted inputs and, under Xvfb, 
 - **Mission 2's strike, flown by hand.** Is four hits in front of the stand the right difficulty when flying along the column at speed?
 - **Restart** from the pause menu and from the review screen, mid-mission, by hand.
 - **Audio balance** of the synthesised music and effects. Headless and Xvfb runs use the dummy audio driver, so no sound was heard during development. The cues were exported to WAV and checked numerically only: music at -14 to -17 dB RMS, no clipping.
-- **Performance on real GPUs.** Development rendering used software OpenGL (llvmpipe).
+- **Performance on real GPUs.** Development rendering used software OpenGL (llvmpipe) and software WebGL (SwiftShader).
+- **The browser build on real browsers.** Development tests ran in headless Chromium only. The `boot`, `food`, `m1_tea`, `restart` and `m2` suites also pass inside the browser build (`index.html?autotest=...`). Check that pointer lock behaves well in Firefox and Safari.
 
 ## Project layout
 
@@ -165,6 +177,7 @@ scripts/missions/          mission.gd (shared rules, scoring), m1_chip.gd,
                            m2_inspection.gd, briefings.gd
 scripts/ui/                hud.gd, menus.gd, ui_theme.gd
 tests/autotest.gd          Automated checks and screenshot tour
+tools/build_web.sh         Browser export (Web preset in export_presets.cfg)
 docs/screenshots/          Captures from the screenshot tour
 SOURCES.md                 Research notes, approximations, attribution
 ```

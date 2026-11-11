@@ -1,7 +1,8 @@
 extends Node
 ## Procedural audio. Every sound effect and music cue is synthesised at
-## start-up from code, so the project ships no audio files. Music renders on a
-## worker thread and starts when ready. Registered as the `Sfx` autoload.
+## start-up from code, so the project ships no audio files. Music renders in
+## resumable slices: on a worker thread on desktop, and a few milliseconds per
+## frame in single-threaded browser builds. Registered as the `Sfx` autoload.
 
 const RATE := 22050
 
@@ -12,6 +13,9 @@ var _rng := RandomNumberGenerator.new()
 var _mutex := Mutex.new()
 var _ready_music: Array = []
 var _task_id := -1
+var _music_jobs: Array = []
+var _sliced := false
+const MUSIC_ORDER := ["theme", "mission", "chase", "results", "march"]
 
 var _music_a: AudioStreamPlayer
 var _music_b: AudioStreamPlayer
@@ -34,7 +38,10 @@ func _ready() -> void:
 	add_child(_pos_parent)
 	_build_sfx()
 	if not Game.cmd.has("no-music"):
-		_task_id = WorkerThreadPool.add_task(_build_music_thread, false, "music synth")
+		_prepare_music_jobs()
+		_sliced = OS.has_feature("web")
+		if not _sliced:
+			_task_id = WorkerThreadPool.add_task(_build_music_thread, false, "music synth")
 
 
 func _exit_tree() -> void:
@@ -52,6 +59,8 @@ func _make_music_player() -> AudioStreamPlayer:
 
 
 func _process(delta: float) -> void:
+	if _sliced and not _music_jobs.is_empty():
+		_music_step(5000)
 	_mutex.lock()
 	var arrived := _ready_music.duplicate()
 	_ready_music.clear()
@@ -540,43 +549,111 @@ func _sfx_water() -> PackedFloat32Array:
 # --------------------------------------------------------------------------
 
 func _build_music_thread() -> void:
+	while _music_step(1 << 60):
+		pass
+
+
+## Queues one render job per cue: notes, then echo, then peak, then encode.
+func _prepare_music_jobs() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 1940
-	for cue in ["theme", "mission", "chase", "results", "march"]:
+	for cue in MUSIC_ORDER:
 		var spec: Dictionary = call("_song_" + cue)
-		var buf := _render_song(spec, rng)
-		var w := _wav(buf, bool(spec.get("loop", true)), 0.85)
-		_mutex.lock()
-		_ready_music.append([cue, w])
-		_mutex.unlock()
+		var spb := 60.0 / float(spec["bpm"])
+		var looped: bool = spec.get("loop", true)
+		var length := float(spec["beats"]) * spb
+		var notes: Array = []
+		for track in spec["tracks"]:
+			var gain: float = track[1]
+			for note in track[2]:
+				var vel: float = gain * float(note[3]) if note.size() > 3 else gain
+				notes.append([str(track[0]), float(note[0]) * spb, float(note[1]) * spb, float(note[2]), vel])
+		_music_jobs.append({
+			"cue": cue, "looped": looped, "buf": _buf(length + (0.0 if looped else 1.5)),
+			"notes": notes, "ni": 0, "st": {}, "stage": 0, "pos": 0, "peak": 0.0001,
+			"bytes": PackedByteArray(), "rng": rng,
+		})
 
 
-func _render_song(spec: Dictionary, rng: RandomNumberGenerator) -> PackedFloat32Array:
-	var bpm: float = spec["bpm"]
-	var beats: float = spec["beats"]
-	var spb := 60.0 / bpm
-	var length := beats * spb
-	var looped: bool = spec.get("loop", true)
-	var buf := _buf(length + (0.0 if looped else 1.5))
-	for track in spec["tracks"]:
-		var inst: String = track[0]
-		var gain: float = track[1]
-		for note in track[2]:
-			_render_note(buf, inst, float(note[0]) * spb, float(note[1]) * spb, float(note[2]), gain * float(note[3]) if note.size() > 3 else gain, looped, rng)
-	# Single-tap echo for a little room.
-	var d := int(0.21 * RATE)
-	var n := buf.size()
-	for i in n:
-		var j := i - d
-		if j < 0:
-			if not looped:
-				continue
-			j += n
-		buf[i] += buf[j] * 0.22
-	return buf
+## Does up to `budget_usec` of rendering work. Returns true while work remains.
+func _music_step(budget_usec: int) -> bool:
+	var t0 := Time.get_ticks_usec()
+	while not _music_jobs.is_empty():
+		if Time.get_ticks_usec() - t0 >= budget_usec:
+			return true
+		var job: Dictionary = _music_jobs[0]
+		var buf: PackedFloat32Array = job["buf"]
+		var n := buf.size()
+		match int(job["stage"]):
+			0:
+				var notes: Array = job["notes"]
+				if int(job["ni"]) >= notes.size():
+					job["stage"] = 1
+					job["pos"] = 0
+					continue
+				var nt: Array = notes[job["ni"]]
+				if _render_note(buf, nt[0], nt[1], nt[2], nt[3], nt[4], job["looped"], job["rng"], job["st"], 4096):
+					job["ni"] = int(job["ni"]) + 1
+					job["st"] = {}
+			1:
+				# Single-tap echo for a little room.
+				var d := int(0.21 * RATE)
+				var a: int = job["pos"]
+				var b := mini(a + 16384, n)
+				var looped: bool = job["looped"]
+				for i in range(a, b):
+					var j := i - d
+					if j < 0:
+						if not looped:
+							continue
+						j += n
+					buf[i] += buf[j] * 0.22
+				job["pos"] = b
+				if b >= n:
+					job["stage"] = 2
+					job["pos"] = 0
+			2:
+				var a2: int = job["pos"]
+				var b2 := mini(a2 + 32768, n)
+				var peak: float = job["peak"]
+				for i in range(a2, b2):
+					peak = maxf(peak, absf(buf[i]))
+				job["peak"] = peak
+				job["pos"] = b2
+				if b2 >= n:
+					job["stage"] = 3
+					job["pos"] = 0
+					var bytes := PackedByteArray()
+					bytes.resize(n * 2)
+					job["bytes"] = bytes
+			3:
+				var a3: int = job["pos"]
+				var b3 := mini(a3 + 32768, n)
+				var bytes2: PackedByteArray = job["bytes"]
+				var scale := 0.85 * 0.92 / float(job["peak"])
+				for i in range(a3, b3):
+					bytes2.encode_s16(i * 2, int(clampf(buf[i] * scale, -1.0, 1.0) * 32000.0))
+				job["pos"] = b3
+				if b3 >= n:
+					var w := AudioStreamWAV.new()
+					w.format = AudioStreamWAV.FORMAT_16_BITS
+					w.mix_rate = RATE
+					w.stereo = false
+					w.data = bytes2
+					if job["looped"]:
+						w.loop_mode = AudioStreamWAV.LOOP_FORWARD
+						w.loop_begin = 0
+						w.loop_end = n
+					_mutex.lock()
+					_ready_music.append([job["cue"], w])
+					_mutex.unlock()
+					_music_jobs.pop_front()
+	return false
 
 
-func _render_note(buf: PackedFloat32Array, inst: String, start: float, dur: float, pitch: float, vel: float, looped: bool, rng: RandomNumberGenerator) -> void:
+## Renders up to `max_n` samples of one note into `buf`, resuming from the
+## oscillator state kept in `st`. Returns true when the note is finished.
+func _render_note(buf: PackedFloat32Array, inst: String, start: float, dur: float, pitch: float, vel: float, looped: bool, rng: RandomNumberGenerator, st: Dictionary, max_n: int) -> bool:
 	var n := buf.size()
 	var s0 := int(start * RATE)
 	var f := _midi(pitch)
@@ -588,11 +665,14 @@ func _render_note(buf: PackedFloat32Array, inst: String, start: float, dur: floa
 		"pluck": release = 0.05
 		"organ": release = 0.05
 	var total := int((dur + release) * RATE)
-	var phase := 0.0
-	var phase2 := 0.0
-	var lp := 0.0
-	var prev := 0.0
-	for i in total:
+	var i0: int = st.get("i", 0)
+	var i_end := mini(total, i0 + max_n)
+	var phase: float = st.get("phase", 0.0)
+	var phase2: float = st.get("phase2", 0.0)
+	var lp: float = st.get("lp", 0.0)
+	var prev: float = st.get("prev", 0.0)
+	var finished := i_end >= total
+	for i in range(i0, i_end):
 		var t := float(i) / RATE
 		var s := 0.0
 		match inst:
@@ -642,9 +722,16 @@ func _render_note(buf: PackedFloat32Array, inst: String, start: float, dur: floa
 		var idx := s0 + i
 		if idx >= n:
 			if not looped:
+				finished = true
 				break
 			idx -= n
 		buf[idx] += s * vel
+	st["i"] = i_end
+	st["phase"] = phase
+	st["phase2"] = phase2
+	st["lp"] = lp
+	st["prev"] = prev
+	return finished
 
 
 ## Notes are [beat, length_in_beats, midi_pitch, velocity].

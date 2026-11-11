@@ -215,13 +215,13 @@ func _refresh_objectives() -> void:
 		var st: String = o["state"]
 		if st == "hidden":
 			continue
-		var prefix := "▸ "
+		var prefix := "[ ] "
 		var col := UI.C_TEXT
 		if st == "done":
-			prefix = "✓ "
+			prefix = "[x] "
 			col = Color(0.55, 0.75, 0.55)
 		elif o["optional"]:
-			prefix = "○ "
+			prefix = "( ) "
 			col = UI.C_DIM
 		var l := UI.label(prefix + str(o["text"]), 15, col)
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -249,17 +249,22 @@ func _process(delta: float) -> void:
 		_beak.text = "BEAK: " + it.display_name + "  [SECRET]"
 		_beak.add_theme_color_override("font_color", UI.C_ACCENT)
 	else:
-		_beak.text = "BEAK: " + it.display_name + ("  ★ bonus" if it.bonus_points > 0 else "")
+		_beak.text = "BEAK: " + it.display_name + ("  + bonus" if it.bonus_points > 0 else "")
 		_beak.add_theme_color_override("font_color", Color(1.0, 0.85, 0.35))
 	var maxp: int = gull.profile["max_payload"]
 	var pips := ""
 	for i in maxp:
-		pips += "● " if i < gull.payload else "○ "
+		pips += "• " if i < gull.payload else "· "
 	_payload.text = "PAYLOAD  " + pips
 	var spd: float = gull.velocity.length()
 	_flight.text = "%s   SPD %d   ALT %d m   %s" % [gull.mode_name(), int(spd), int(gull.global_position.y), str(gull.profile["name"]).to_upper()]
 	_score.text = "SCORE %d    %s" % [mission.live_score(), mission.fmt_time(mission.elapsed)]
 	_scout_label.visible = gull.scouting
+	if OS.has_feature("web") and mission.running and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		_scout_label.text = "CLICK TO TAKE CONTROL OF THE GULL"
+		_scout_label.visible = true
+	elif gull.scouting:
+		_scout_label.text = "SCOUTING — hold on a guard to tag"
 	_controls.text = _controls_text()
 	_overlay.queue_redraw()
 
