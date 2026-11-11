@@ -264,7 +264,7 @@ func complete_objective(id: String) -> void:
 		return
 	o["state"] = "done"
 	Sfx.play("objective", -3.0)
-	toast.emit("✓ " + str(o["text"]).split("[")[0].strip_edges(), C_GOOD)
+	toast.emit("Done: " + str(o["text"]).split("[")[0].strip_edges(), C_GOOD)
 	objectives_changed.emit()
 
 

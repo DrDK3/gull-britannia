@@ -86,6 +86,8 @@ func shot(name: String) -> void:
 
 func launch(id := "m1") -> Node:
 	main.launch(id)
+	# Launch shows a loading screen first, so wait for the mission itself.
+	await wait_until(func(): return main.mission != null and main.mission.running, 30.0)
 	await frames(5)
 	return main.mission
 
@@ -519,10 +521,12 @@ func suite_restart() -> void:
 	sentry().suspicion = 70.0
 	mi.stats["spotted"] = 2
 	check("pre-restart state is dirty", mi.food_total() > 0 and mi.objective_state("lunch") == "done")
+	var old_id := mi.get_instance_id()
 	main.restart()
+	await wait_until(func(): return main.mission != null and main.mission.get_instance_id() != old_id and main.mission.running, 30.0)
 	await frames(5)
 	var m2: Node = main.mission
-	check("restart builds a fresh mission", m2 != mi and m2.running)
+	check("restart builds a fresh mission", m2.get_instance_id() != old_id and m2.running)
 	check("restart resets objectives", m2.objective_state("takeoff") == "active" and m2.objective_state("lunch") == "hidden")
 	check("restart resets score", m2.food_total() == 0 and int(m2.stats["spotted"]) == 0 and m2.live_score() == 0)
 	check("restart resets pickups", m2.chips.size() == 4 and m2.chips[0].is_grabbable() and m2.dispatch.state == Item.State.PLACED)
@@ -532,7 +536,9 @@ func suite_restart() -> void:
 	main.pause()
 	await frames(2)
 	check("pause menu opens", main.menus.current == "pause" and get_tree().paused)
+	var m2_id := m2.get_instance_id()
 	main.restart()
+	await wait_until(func(): return main.mission != null and main.mission.get_instance_id() != m2_id and main.mission.running, 30.0)
 	await frames(5)
 	check("restart from pause unpauses and rebuilds", not get_tree().paused and main.mission.running)
 
@@ -788,6 +794,26 @@ func suite_pilot_distraction() -> void:
 	check("pilot: distraction route delivered", mi.objective_state("deliver") == "done")
 	check("pilot: distraction route never spotted", int(mi.stats["spotted"]) == 0, "spotted=%d" % int(mi.stats["spotted"]))
 	g.bot_input = {}
+
+
+## Renders the glyphs the game uses, to check font coverage (web has no system fonts).
+func suite_glyphs() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 50
+	add_child(layer)
+	var bg := ColorRect.new()
+	bg.color = Color(0.1, 0.1, 0.12)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(bg)
+	var v := VBoxContainer.new()
+	v.position = Vector2(20, 20)
+	layer.add_child(v)
+	for line in ["1 dash — dot · bullet • ellipsis …", "2 check ✓ circle ○ star ★ tri ▸ disc ● square ■ □", "3 КОМЕНДАТУРА ПОРТА КОРМИТЬ ЧАЕК ЗАПРЕЩЕНО", "4 СЛАВА СОВЕТСКОЙ АРМИИ! ПК-117", "5 ASCII [x] [ ] ( ) * > >> # o"]:
+		var l := Label.new()
+		l.text = line
+		l.add_theme_font_size_override("font_size", 30)
+		v.add_child(l)
+	await seconds(30.0)
 
 
 ## Screenshot tour for visual review (run with a display and --shots).

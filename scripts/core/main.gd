@@ -22,6 +22,9 @@ var mission_id := ""
 var backdrop: Node3D
 var _backdrop_cam: Camera3D
 var _t := 0.0
+## Set once the pointer is actually captured during play; a browser releases
+## it on Esc (or tab switch), which then pauses the game.
+var _was_captured := false
 
 
 func _ready() -> void:
@@ -63,9 +66,12 @@ func _show_backdrop() -> void:
 	backdrop = Node3D.new()
 	backdrop.name = "Backdrop"
 	add_child(backdrop)
+	var t0 := Time.get_ticks_msec()
 	var w := Dartmouth.new()
 	backdrop.add_child(w)
 	w.build({"occupation": 1})
+	if Game.cmd.has("trace"):
+		print("trace backdrop: built in %d ms" % (Time.get_ticks_msec() - t0))
 	_backdrop_cam = Camera3D.new()
 	_backdrop_cam.far = 1600.0
 	_backdrop_cam.fov = 60.0
@@ -83,6 +89,13 @@ func _free_backdrop() -> void:
 
 func _process(delta: float) -> void:
 	_t += delta
+	var playing: bool = mission != null and mission.running and menus.current == "" and not get_tree().paused
+	if playing:
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			_was_captured = true
+		elif _was_captured:
+			# The browser let go of the pointer (Esc, tab switch): pause.
+			pause()
 	if _backdrop_cam != null:
 		var a := _t * 0.035 + 2.2
 		var center := Vector3(10, 4, 10)
@@ -106,13 +119,20 @@ func launch(id: String) -> void:
 		menus.show_title()
 		return
 	_clear_mission()
-	_free_backdrop()
 	get_tree().paused = false
+	# Building the town takes a moment (longer in a browser): say so first.
+	menus.show_loading(str(info["title"]))
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_free_backdrop()
 	mission_id = id
+	var t0 := Time.get_ticks_msec()
 	var script: Script = load(info["script"])
 	mission = script.new()
 	mission.name = "Mission"
 	add_child(mission)
+	if Game.cmd.has("trace"):
+		print("trace launch: %s built in %d ms" % [id, Time.get_ticks_msec() - t0])
 	mission.process_mode = Node.PROCESS_MODE_PAUSABLE
 	hud = Hud.new()
 	hud.process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -120,8 +140,14 @@ func launch(id: String) -> void:
 	hud.bind(mission)
 	mission.finished.connect(_on_finished)
 	menus.hide_all()
+	_was_captured = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	mission.start()
+	if Game.cmd.has("trace"):
+		var tf := Time.get_ticks_msec()
+		await get_tree().process_frame
+		await get_tree().process_frame
+		print("trace launch: first frames rendered in %d ms" % (Time.get_ticks_msec() - tf))
 
 
 func _clear_mission() -> void:
@@ -143,6 +169,7 @@ func restart() -> void:
 func resume() -> void:
 	get_tree().paused = false
 	menus.hide_all()
+	_was_captured = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 

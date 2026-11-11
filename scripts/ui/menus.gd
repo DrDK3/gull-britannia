@@ -110,7 +110,8 @@ func show_title() -> void:
 	v.add_child(UI.button(begin_text, func(): start_requested.emit(next["id"]), 340))
 	v.add_child(UI.button("Operations", show_select, 340))
 	v.add_child(UI.button("Settings", func(): show_settings(show_title), 340))
-	v.add_child(UI.button("Quit", func(): quit_requested.emit(), 340))
+	if not OS.has_feature("web"):
+		v.add_child(UI.button("Quit", func(): quit_requested.emit(), 340))
 	var foot := UI.label("Godot %s · Compatibility renderer · All art and music generated in-engine" % Engine.get_version_info()["string"], 12, UI.C_DIM)
 	foot.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	foot.position = Vector2(70, -40)
@@ -236,6 +237,17 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # --------------------------------------------------------------------------
+# Loading
+# --------------------------------------------------------------------------
+
+func show_loading(title_text: String) -> void:
+	var s := _new_screen("loading", 0.92)
+	var v := _center_box(s, 600)
+	v.add_child(UI.label("OPERATION: " + title_text.to_upper(), 26, UI.C_TEXT, UI.serif()))
+	v.add_child(UI.label("Assembling Dartmouth... (rooftops, tea, sentries)", 15, UI.C_DIM, UI.mono()))
+
+
+# --------------------------------------------------------------------------
 # Pause
 # --------------------------------------------------------------------------
 
@@ -357,7 +369,7 @@ func show_results(r: Dictionary, new_best: bool, next_info: Dictionary) -> void:
 	var tl := UI.label("TOTAL", 20, UI.C_INK, UI.serif())
 	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	total_row.add_child(tl)
-	total_row.add_child(UI.label(str(r["total"]) + ("   ★ NEW BEST" if new_best else ""), 20, UI.C_INK, UI.serif()))
+	total_row.add_child(UI.label(str(r["total"]) + ("   NEW BEST!" if new_best else ""), 20, UI.C_INK, UI.serif()))
 	total_row.visible = false
 	v.add_child(total_row)
 	_review_lines.append(total_row)
