@@ -1,4 +1,4 @@
-.godot/
-*.import
-export/
-build/
+node_modules/
+dist/
+out/
+*.log

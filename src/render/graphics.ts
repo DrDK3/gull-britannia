@@ -1,0 +1,124 @@
+/**
+ * Graphics settings: three presets (Performance, Balanced, Ultra) and the individual options they set, kept in
+ * the browser (per viewer). Most options apply at once; the scenery detail and the shadow technique are chosen
+ * when the 3D view is built, so changing them asks for a reload. Visual only: nothing here touches the physics.
+ *
+ * The default is Balanced on a real graphics card and Performance on a software renderer (CI, a machine with
+ * no GPU). `?quality=low|high` in the address still forces the scenery and shadows (tests and screenshots).
+ */
+
+export type GraphicsPreset = 'performance' | 'balanced' | 'ultra';
+
+export interface GraphicsSettings {
+  preset: GraphicsPreset | 'custom';
+  /** Rendering resolution as a share of the screen's (device pixels), 0.5 … 1. */
+  resolutionScale: number;
+  /** Highest device-pixel ratio drawn (sharpness on high-density screens). */
+  maxPixelRatio: number;
+  /** Scenery detail and shadows: 'high' = cascaded shadows over the town and woods, more trees (needs reload). */
+  scenery: 'low' | 'high';
+  /** Shadow maps: 'fine' doubles their resolution (sharper shadows; needs reload). */
+  shadows: 'standard' | 'fine';
+  /** Water: 'high' adds sky reflections from the environment and fine ripple detail; 'low' a sky gradient. */
+  water: 'low' | 'high';
+  /**
+   * Reflections of the shore, the boats and the sky in calm water (reflection.ts; needs detailed water): the scene
+   * drawn a second time, at a third ('low') or half ('high') of the resolution.
+   */
+  reflections: 'off' | 'low' | 'high';
+  /** Ambient occlusion: soft darkening where surfaces meet (post.ts), a post-processing pass. */
+  ambientOcclusion: boolean;
+  /** Foam round the hull, the bow wave and the wake's foam texture. */
+  hullFoam: boolean;
+  /** Spray thrown from the bow when it slams into a wave at speed. */
+  spray: boolean;
+  /** Haze towards the sun and warm light low in the sky (aerial perspective). */
+  atmosphere: boolean;
+  /** How much of the boat's motion the chase and scenic cameras follow (0 = steady, 1 = full). */
+  cameraMotion: number;
+}
+
+export const PRESETS: Record<GraphicsPreset, Omit<GraphicsSettings, 'preset' | 'cameraMotion'>> = {
+  /**
+   * "Smooth" on screen. Juniors round: haze from the sky's colour (consistent light and a clear horizon, at the cost of a
+   * few vector operations a frame) and the bow spray (a fresh-wind cue) are on here too; both measured with
+   * tools/gfx-bench.mjs before and after (docs/JUNIORS_REPORT.md §2).
+   */
+  performance: { resolutionScale: 0.75, maxPixelRatio: 1, scenery: 'low', shadows: 'standard', water: 'low', reflections: 'off', ambientOcclusion: false, hullFoam: true, spray: true, atmosphere: true },
+  balanced: { resolutionScale: 1, maxPixelRatio: 1.5, scenery: 'high', shadows: 'standard', water: 'high', reflections: 'low', ambientOcclusion: false, hullFoam: true, spray: true, atmosphere: true },
+  ultra: { resolutionScale: 1, maxPixelRatio: 2, scenery: 'high', shadows: 'fine', water: 'high', reflections: 'high', ambientOcclusion: true, hullFoam: true, spray: true, atmosphere: true },
+};
+
+/**
+ * What the presets are called on screen (juniors round): the lowest is "Smooth", so it does not sound like a
+ * downgrade. The stored keys are unchanged, so saved settings still load.
+ */
+export const PRESET_LABELS: Record<GraphicsPreset, string> = { performance: 'Smooth', balanced: 'Balanced', ultra: 'Ultra' };
+
+export const presetLabel = (p: string): string => PRESET_LABELS[p as GraphicsPreset] ?? p;
+
+export const DEFAULT_CAMERA_MOTION = 0.5;
+// Gull Britannia: its own key (SailSim shares the drdk3.github.io origin and its localStorage).
+const KEY = 'gull-britannia.graphics.v1';
+
+/** The preset for this renderer: Performance on a software renderer, otherwise Balanced. */
+export function defaultPreset(rendererName: string): GraphicsPreset {
+  return /swiftshader|llvmpipe|software|basic render/i.test(rendererName) ? 'performance' : 'balanced';
+}
+
+export function presetSettings(p: GraphicsPreset, cameraMotion = DEFAULT_CAMERA_MOTION): GraphicsSettings {
+  return { preset: p, cameraMotion, ...PRESETS[p] };
+}
+
+/** Which preset the options match, or 'custom'. */
+export function matchPreset(s: Omit<GraphicsSettings, 'preset'>): GraphicsSettings['preset'] {
+  for (const p of Object.keys(PRESETS) as GraphicsPreset[]) {
+    const q = PRESETS[p];
+    if ((Object.keys(q) as (keyof typeof q)[]).every((k) => q[k] === s[k])) return p;
+  }
+  return 'custom';
+}
+
+const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
+
+/** Settings from storage (anything missing or invalid falls back to the default preset's). */
+export function loadGraphics(rendererName: string): GraphicsSettings {
+  const base = presetSettings(defaultPreset(rendererName));
+  let raw: unknown;
+  try {
+    raw = JSON.parse(localStorage.getItem(KEY) ?? 'null');
+  } catch {
+    raw = null;
+  }
+  if (!raw || typeof raw !== 'object') return base;
+  const r = raw as Partial<GraphicsSettings>;
+  const out: GraphicsSettings = {
+    preset: 'custom',
+    resolutionScale: typeof r.resolutionScale === 'number' ? clamp(r.resolutionScale, 0.5, 1) : base.resolutionScale,
+    maxPixelRatio: typeof r.maxPixelRatio === 'number' ? clamp(r.maxPixelRatio, 1, 2) : base.maxPixelRatio,
+    scenery: r.scenery === 'low' || r.scenery === 'high' ? r.scenery : base.scenery,
+    shadows: r.shadows === 'standard' || r.shadows === 'fine' ? r.shadows : base.shadows,
+    water: r.water === 'low' || r.water === 'high' ? r.water : base.water,
+    reflections: r.reflections === 'off' || r.reflections === 'low' || r.reflections === 'high' ? r.reflections : base.reflections,
+    ambientOcclusion: typeof r.ambientOcclusion === 'boolean' ? r.ambientOcclusion : base.ambientOcclusion,
+    hullFoam: typeof r.hullFoam === 'boolean' ? r.hullFoam : base.hullFoam,
+    spray: typeof r.spray === 'boolean' ? r.spray : base.spray,
+    atmosphere: typeof r.atmosphere === 'boolean' ? r.atmosphere : base.atmosphere,
+    cameraMotion: typeof r.cameraMotion === 'number' ? clamp(r.cameraMotion, 0, 1) : base.cameraMotion,
+  };
+  out.preset = matchPreset(out);
+  return out;
+}
+
+export function saveGraphics(s: GraphicsSettings): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(s));
+  } catch {
+    // Storage blocked (private window): the settings last for this visit only.
+  }
+}
+
+/** The device-pixel ratio to draw at. */
+export function pixelRatioFor(s: GraphicsSettings, devicePixelRatio: number): number {
+  return Math.max(0.5, Math.min(devicePixelRatio, s.maxPixelRatio) * s.resolutionScale);
+}
