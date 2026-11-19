@@ -47,11 +47,11 @@ The street plan and the reclaimed waterfront are right for 1967. The errors are 
 | Kind | Finding |
 | --- | --- |
 | Errors in my removal list | "Spar" removes three buildings, one of them in the old town. The "Kingswear ferry landing" I kept is a modern pontoon between Darthaven and Hoodown. The Double Steps Pontoon I kept dates from about 2023. My notes say the marinas date from the 1970s, but Dart Marina at Sandquay opened in 1965 (the hotel in 1961). |
-| Modern things still in the picture | The Dartmouth Steam Railway's steam train (in 1967 the line was British Railways, with diesel units and no steam). The 2009 Higher Ferry. Today's Lower Ferry floats and passenger ferry. The training ship *Hindostan* and the blue-and-white picket boats at Sandquay (built 1975). Buoys in today's system (introduced from 1977). The Kingswear light (today's drum dates from 1981). The Hoodown depot. Present-day walkers, cars and yacht shapes. |
-| 1967 things missing | Philip & Son's working shipyard at Noss. The covered wooden pontoon at Dartmouth station. Kingswear's idle goods yard where Darthaven now lies. The river-boat fleet (five motor vessels). The paddle steamer *Kingswear Castle* laid up in Old Mill Creek, and the hulk of *Totnes Castle*. The 1864 stone lighthouse. Western National buses, K6 phone boxes, a mix of old and new road signs. |
-| Story material the research turned up | 3 June 1967 is two days before the Six-Day War. Chichester sailed into Plymouth on 28 May. Sgt. Pepper came out on 1 June. Pirate radio was legal until 14 August. The Devon and Cornwall Constabulary was formed that month. *Kingswear Castle* was sold for £600 and towed away in August. The tide on 3 June was near neaps, so "Low Tide" belongs about a week later, on the spring tides after the new moon of 8 June. |
+| Modern things still in the picture | The Dartmouth Steam Railway's steam train (in 1967 the line was British Railways, with green diesel units and no steam). The 2009 Higher Ferry. Today's Lower Ferry floats and passenger ferry. The training ship *Hindostan* and the blue-and-white picket boats at Sandquay (built 1975). Buoys in today's system (introduced from 1977). The Kingswear light (today's drum is believed to date from 1981). The Hoodown depot. College Way (built 1969). The tourist information building round the Newcomen engine (1993). The supermarket and flats on Mayor's Avenue (1995–96; a Western National bus park in 1967). Present-day walkers, cars and yacht shapes. |
+| 1967 things missing | Philip & Son's working shipyard at Noss. The covered wooden pontoon at Dartmouth station. Kingswear's idle goods yard where Darthaven now lies. The river-boat fleet: five white motor vessels. Three idle paddle steamers: *Kingswear Castle* laid up in Old Mill Creek, *Totnes Castle* with sheds on her deck as a sailing school, and *Duke of Devonshire* moored below the Higher Ferry. The older stone lighthouse (not yet verified). The "Boatel" on the North Embankment. Western National buses, K6 phone boxes, a mix of old and new road signs. Period pub and shop names (today's Dolphin was the Royal Union Inn; Woolworths stood on Victoria Road). |
+| Story material the research turned up | 3 June 1967 is two days before the Six-Day War. Chichester sailed into Plymouth on 28 May. Sgt. Pepper was newly out. Pirate radio was legal until 14 August. The Devon and Cornwall Constabulary was weeks old. *Kingswear Castle* had just been sold for £600 and was towed away in August. June 1967 was dry and sunny after the third-wettest May on record for the region. The tide on 3 June was near neaps, so "Low Tide" belongs about a week later, on the spring tides after the new moon of 8 June. |
 
-**Confidence.** The session's network policy blocked the primary-source sites, and the search budget ran out. Every research finding rests on search-result summaries, not full pages. Treat the 1967 report as a strong draft that needs a verification pass.
+**Confidence.** The first round of research rested on search-result summaries, because the network blocked the source sites. A verification pass has since checked the report's claims against full pages: about 80 listing entries, the Dartmouth History Research Group's records, Simplon's ferry pages, railway and ship registers, and Met Office data. Most claims held; the corrections are in the revised report. Still out of reach: the 1960s Ordnance Survey maps (the map site demands a CAPTCHA), Historic England and Francis Frith directly (bot challenges; the listing texts were read on another site), any 1967 tide table, and the old Kingswear lighthouse.
 
 ## Decisions I need from you
 
@@ -63,7 +63,7 @@ The street plan and the reclaimed waterfront are right for 1967. The errors are 
 | 4 | **Sound.** Stay with code-made sound only, or allow free-licence recordings (gull calls, harbour ambience)? | Allow recordings for calls and ambience; keep the original score. Synthesis caps the quality. |
 | 5 | **Characters.** Rebuild people on SailSim's own figures, and replace the gull model? | Yes to both. The gull is the asset players look at most and is currently the crudest. A new gull needs an authored model: tell me if you have an artist, or I will build the best one I can in code. |
 | 6 | **How far to take 1967.** Remove anachronisms only, or also add back the lost landmarks (Noss shipyard, covered pontoon, laid-up paddle steamers, the old lighthouse, the goods yard)? | Add them back, in priority order. They are story material: Mission 4 is set at Sandquay and Noss. |
-| 7 | **Research access.** Allow the blocked research sites so the 1967 findings can be checked against full pages and 1960s maps? | Yes. I am asking for this now. |
+| 7 | **Research access.** Allow the blocked research sites so the 1967 findings can be checked against full pages? | Done: you approved it, and the verification pass has run. |
 
 ## The plan
 
@@ -132,10 +132,10 @@ The UI foundation. Without it, each new mission adds more hard-coded keys and mo
 
 | Item | Size |
 | --- | --- |
-| Verification pass on the research, with full pages and 1960s Ordnance Survey maps (needs network access) | M |
+| Settle what the verification pass could not reach: the 1960s Ordnance Survey sheets (best viewed in your own browser at the National Library of Scotland's map site), a 1967 tide table, the old Kingswear lighthouse, dates for the North Embankment apartment blocks | S–M, partly yours |
 | Ferries and trains as they were: Higher Ferry No. 7, the Hauley tugs and period floats, the British Railways ferry, a diesel unit on the branch | M–L |
-| The river: the motor-vessel fleet, the laid-up paddle steamers, fewer and older yachts, period buoys, no modern harbour branding | M |
-| Add back: Noss shipyard, the covered station pontoon, Kingswear goods yard, the 1864 lighthouse | M–L |
+| The river: the five white motor vessels, the three idle paddle steamers, fewer and older yachts, period buoys, no modern harbour branding | M |
+| Add back: Noss shipyard, the covered station pontoon, Kingswear goods yard, the older lighthouse once verified; remove College Way and the later buildings on Mayor's Avenue | M–L |
 | Streets: period cars (nothing newer than an E plate), a Western National bus, K6 kiosks, pillar boxes, mixed road signs, period dress for walkers | M–L |
 | Names and signs: "The Cinema", the British Railways ticket office, the Harbour Commissioners | S |
 | Period sound: the Light Programme from a window, the ferry bell, ice-cream chimes, diesel not steam | S–M |
@@ -159,11 +159,11 @@ A new gull model and animation. Spatial sound with a limiter. Particles and cont
 7. Five people who have never seen the game finish Mission 1 without help. This needs you to arrange it.
 8. The story bible is agreed.
 9. CI runs on every push.
-10. The 1967 verification pass is done and the removal list corrected.
+10. The 1967 removal list is corrected against the verified report.
 
 ## What is not verified
 
-- **The research** rests on search summaries (see Confidence above).
+- **The research** is verified against full pages for most claims, with the exceptions listed under Confidence above. Colours of some vessels come from a researcher's reading of scanned postcards.
 - **Simulated numbers** in the design review come from the tests' stand-in town, not the captured one. They should be close, not exact.
 - **Performance** was measured under software rendering. Draw-call counts transfer; frame rates do not. No real GPU, Safari, Firefox, trackpad or gamepad has been tested.
 - **No one has play-tested it.** Every judgement about fun, difficulty and onboarding is expert opinion until real players try it.
