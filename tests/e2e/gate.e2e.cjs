@@ -18,9 +18,10 @@ async function openGame(browser, query = '') {
   const page = await browser.newPage({ viewport: { width: 800, height: 450 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  const t0 = Date.now();
   await page.goto(url + query);
-  await page.waitForFunction(() => ['title', 'error'].includes(window.__gull?.game.state.screen), null, { timeout: 360000, polling: 500 });
-  return { page, errors };
+  await page.waitForFunction(() => ['title', 'error'].includes(window.__gull?.game.state.screen), null, { timeout: 360000, polling: 100 });
+  return { page, errors, loadMs: Date.now() - t0 };
 }
 
 const state = (page) =>
@@ -59,8 +60,9 @@ const click = (page, text) => page.click(`button:has-text("${text}")`, { timeout
     browser = await chromium.launch({ args: [...args, '--headless=new'], executablePath: exe });
   }
 
-  const { page, errors } = await openGame(browser);
-  check('loads to the title screen', (await state(page)).screen === 'title');
+  const { page, errors, loadMs } = await openGame(browser);
+  // The time is printed for the record (compare it between runs on the same machine); it is not a pass mark.
+  check('loads to the title screen', (await state(page)).screen === 'title', `${(loadMs / 1000).toFixed(1)} s at 800×450`);
 
   // ---------------------------------------------------------------- the Ready gate
   await click(page, 'File 1');

@@ -128,20 +128,8 @@ body,
 
 .gb-loadbar i {
   display: block;
-  width: 30%;
   height: 100%;
   background: var(--stamp);
-  animation: gb-slide 1.6s linear infinite;
-  will-change: transform;
-}
-
-@keyframes gb-slide {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(334%);
-  }
 }
 
 .gb-error {
@@ -779,14 +767,8 @@ body,
 @media (prefers-reduced-motion: reduce) {
   .gb-radio,
   .gb-banner,
-  .gb-toast,
-  .gb-loadbar i {
+  .gb-toast {
     animation: none;
-  }
-
-  .gb-loadbar i {
-    width: 100%;
-    opacity: 0.4;
   }
 }
 

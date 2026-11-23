@@ -57,5 +57,6 @@ Sources for each: `reports/Dartmouth and the Dart in 1967.md`.
 
 | # | What | Measure | Size |
 | --- | --- | --- | --- |
-| P-1 | **Loading is still about nine seconds on a software renderer**: about 4.6 s building the scene and 3 to 3.7 s compiling shaders. Baking the collision grids took about 1.8 s off. | `node tools/measure-load.cjs <url> 3` | M |
+| P-1 | **Loading is still nine to ten seconds on a software renderer**: about 4.6 s building the scene and 3.5 s compiling shaders. Baking the collision grids took about two seconds off. Anything that animates during the load costs dearly there: a moving loading bar took the load from 9 s to 17 s. | `node tools/measure-load.cjs <url> 3` | M |
+| P-3 | **No budget in CI.** Load time is measured by hand. A regression of several seconds went unnoticed for three commits. A check that fails above, say, twice the usual time on the CI machine would have caught it. | — | S |
 | P-2 | **Characters cost about 2,000 draw calls** in Mission 2: each figure is many small meshes (engine review R1). | `?debug` in File 2 | M |

@@ -84,6 +84,8 @@ export interface GuardOverlay {
 export interface GameState {
   screen: Screen;
   progress: string;
+  /** How far through loading (0 to 1): moves at each stage, not continuously. */
+  loaded: number;
   error?: string;
   issues: string[];
   gate: Gate;
@@ -200,6 +202,7 @@ export class GullGame {
     this.st = {
       screen: 'loading',
       progress: 'Loading the River Dart…',
+      loaded: 0.05,
       issues: [],
       gate: 'ready',
       inputMode: 'mouse',
@@ -306,7 +309,7 @@ export class GullGame {
     }
     performance.mark('gb:data');
     this.applyConditions(M1_CONDITIONS);
-    this.publish({ progress: 'Raising the town…', issues });
+    this.publish({ progress: 'Raising the town…', loaded: 0.2, issues });
     await nextFrame();
     const dart = new DartScene({ manifest: data.manifest, geo: data.geo, features: data.features, drape: data.drape, town: data.town, waterMask: data.waterMask, roads: data.roads, quays: data.quays, detail: this.flags.bake ? 'high' : view.quality, era: '1967' });
     this.dart = dart;
@@ -314,7 +317,8 @@ export class GullGame {
     let grids = await bakedP;
     this.collisionSource = grids ? 'baked' : 'surveyed';
     if (!grids) {
-      this.publish({ progress: 'Surveying the rooftops…' });
+      this.publish({ progress: 'Surveying the rooftops…', loaded: 0.6 });
+      await nextFrame();
       grids = await captureHeights(view.renderer, dart, CAPTURE_AREAS, (d, n) => this.publish({ progress: `Surveying the rooftops… ${Math.round((100 * d) / n)}%` }));
     }
     performance.mark('gb:collision');
@@ -328,7 +332,8 @@ export class GullGame {
     };
     this.world = new World({ grids, waterLevel: this.waterLevel(), beyond: (e, n) => dart.groundAt(e, n), ground, bounds: PLAY_BOUNDS });
     view.setWeather(this.sceneWeather());
-    this.publish({ progress: 'Compiling shaders…' });
+    this.publish({ progress: 'Painting the town…', loaded: 0.7 });
+    await nextFrame();
     this.titleCamera(0);
     this.renderFrame(0);
     await view.warmUp().catch(() => undefined);
@@ -336,7 +341,7 @@ export class GullGame {
     this.lastFrame = performance.now();
     this.raf = requestAnimationFrame(this.frame);
     this.audio.music('title');
-    this.publish({ screen: 'title', progress: '' });
+    this.publish({ screen: 'title', progress: '', loaded: 1 });
     performance.mark('gb:title');
   }
 
@@ -357,7 +362,10 @@ export class GullGame {
       },
       this.data?.geo,
     );
-    if (this.world) this.world.waterLevel = this.waterLevel();
+    // While loading there is no town yet: boot() gives the view its weather once, after the scene is in place.
+    // (Doing it here as well made the sky's environment map twice, about a second on a software renderer.)
+    if (!this.world) return;
+    this.world.waterLevel = this.waterLevel();
     this.view?.setWeather(this.sceneWeather());
   }
 

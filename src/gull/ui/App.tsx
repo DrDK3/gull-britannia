@@ -69,11 +69,14 @@ function Loading({ st }: { st: GameState }) {
         <div className="gb-stamp">Section G · Most secret</div>
         <h1>Gull Britannia</h1>
         <p>{st.progress}</p>
-        {/* Moves on the compositor, so it keeps going while the town is being built on the main thread. */}
-        <div className="gb-loadbar" aria-hidden="true">
-          <i />
+        {/*
+          A bar that moves at each stage and is otherwise still. A continuously animated one keeps the compositor busy,
+          which on a machine without a graphics card nearly doubled the load (9 s to 17 s, measured).
+        */}
+        <div className="gb-loadbar" role="progressbar" aria-label="Loading" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(st.loaded * 100)}>
+          <i style={{ width: `${Math.round(st.loaded * 100)}%` }} />
         </div>
-        <p className="gb-fine">The whole town is being laid out. This takes ten seconds or so.</p>
+        <p className="gb-fine">The whole town is being laid out: about ten seconds. The bar moves in a few large steps.</p>
       </div>
     </div>
   );
