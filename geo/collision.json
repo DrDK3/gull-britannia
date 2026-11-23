@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "generated": "2026-11-23T08:58:24.256Z",
+  "scale": 0.01,
+  "nodata": -32768,
+  "packing": "i16-gradient-zigzag-planes-gzip/1",
+  "order": "row-major, rows south to north, cell centres at e0 + (i + 0.5)·cell; heights are the top of what is drawn, cm above Ordnance Datum Newlyn",
+  "grids": [
+    {
+      "file": "collision-town.i16z",
+      "e0": -640,
+      "n0": -80,
+      "cell": 0.5,
+      "nx": 880,
+      "ny": 1440
+    },
+    {
+      "file": "collision-harbour.i16z",
+      "e0": -1200,
+      "n0": -800,
+      "cell": 2,
+      "nx": 900,
+      "ny": 1100
+    }
+  ]
+}
