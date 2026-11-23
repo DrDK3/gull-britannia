@@ -8,7 +8,24 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 14 Q9 8 16 15 Q23 8 30 14 Q23 11 16 19 Q9 11 2 14Z' fill='%23f3f3ee' stroke='%23222' stroke-width='1'/%3E%3C/svg%3E" />
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Shown until the game's own loading screen takes over; styles are inline so it appears with the first bytes. -->
+    <style>
+      html,body{margin:0;height:100%;background:#0d1216}
+      .boot{position:fixed;inset:0;display:grid;place-items:center;background:radial-gradient(circle at 50% 40%,#2a3b47,#0b1014 75%);font-family:'Courier New',Courier,monospace}
+      .boot-card{background:#efe8d6;color:#1d1c19;padding:28px 32px;width:min(520px,calc(100% - 32px));box-sizing:border-box;border:1px solid #c9bea3}
+      .boot-stamp{display:inline-block;color:#a3261b;border:2px solid #a3261b;padding:2px 8px;font-weight:bold;text-transform:uppercase;letter-spacing:.1em;transform:rotate(-2deg);font-size:14px}
+      .boot h1{font-size:35px;line-height:1.1;margin:8px 0 12px;letter-spacing:.04em}
+      .boot p{margin:0;font-size:16px;line-height:1.45}
+    </style>
+    <div id="root">
+      <div class="boot">
+        <div class="boot-card" role="status">
+          <div class="boot-stamp">Section G · Most secret</div>
+          <h1>Gull Britannia</h1>
+          <p>Opening the file…</p>
+        </div>
+      </div>
+    </div>
     <noscript>Gull Britannia needs JavaScript and WebGL.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>

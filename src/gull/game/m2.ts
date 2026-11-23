@@ -12,12 +12,27 @@
 import { Guard, GuardState } from './guard';
 import type { GullProfile, Perch } from './gull';
 import type { Item } from './items';
-import { Mission, type DropPoint, type Npc, type PoopTarget } from './mission';
+import { Mission, type DropPoint, type MissionConditions, type Npc, type PoopTarget } from './mission';
 import { AllyGull, AllyState, MarchState, Marcher } from './parade';
 import { v3, type V3, type World } from './world';
 
 const PI = Math.PI;
 const WEST = -PI / 2;
+
+/**
+ * Wednesday 7 June 1967, 10.55 British Summer Time (09.55 UTC), the day before the new moon. The water level is
+ * illustrative: with spring tides and high water in the early evening, the real river was probably near low water at
+ * this hour and the Boat Float nearly dry, which would strand the Dorothy May (SOURCES.md; reports/backlog.md).
+ */
+export const M2_CONDITIONS: MissionConditions = {
+  startTime: '1967-06-07T09:55:00Z',
+  windKn: 7,
+  windFromDeg: 250,
+  hwTime: '1967-06-07T09:10:00Z',
+  hwHeightM: 4.0,
+  lwHeightM: 1.9,
+  sky: 'fair',
+};
 
 export const BOMBER_PROFILE: Partial<GullProfile> = {
   name: 'Bomber lead',
@@ -222,7 +237,7 @@ export class Mission2 extends Mission {
       this.allies.push(new AllyGull(names[i]!, v3(at.e, at.n, this.top(at) + 0.25), slots[i]!, this.rng));
     });
 
-    this.addObjective('scout', 'Scout the stand: hold right mouse and tag Lt Voronova at the lectern (a mooring pile behind the stand has a clear view)', v3(M2.voronova.e, M2.voronova.n, deck + 1.7));
+    this.addObjective('scout', 'Scout the stand: hold right mouse or T on Lt Voronova at the lectern to tag her (a mooring pile behind the stand has a clear view)', v3(M2.voronova.e, M2.voronova.n, deck + 1.7));
     this.addObjective('signal', 'Signal the Bomber Wing from the Royal Castle Hotel roof [G]', this.roostPerch.pos, false, 'hidden');
     this.addObjective('strike', 'Lead the flock over the formation as it passes the stand — release with Q', () => this.anchor(), false, 'hidden');
     this.addObjective('document', 'Take the Inspection Order from the lectern', () => this.document.pos, false, 'hidden');

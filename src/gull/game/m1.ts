@@ -17,7 +17,7 @@
 import { Guard, GuardState } from './guard';
 import type { Perch } from './gull';
 import type { Item } from './items';
-import { Mission, type DropPoint, type Npc, type PoopTarget, type Prop } from './mission';
+import { Mission, type DropPoint, type MissionConditions, type Npc, type PoopTarget, type Prop } from './mission';
 import { v3, type World } from './world';
 
 const PI = Math.PI;
@@ -25,6 +25,21 @@ const PI = Math.PI;
 const EAST = PI / 2;
 const SOUTH = PI;
 const WEST = -PI / 2;
+
+/**
+ * Saturday 3 June 1967, 13.20 British Summer Time (12.20 UTC). The moon was two days past its last quarter, so the
+ * tides were near neaps: a modest high water in mid-afternoon. The heights and the time are estimates from the moon's
+ * phase and Dartmouth's mean neap range, not from a 1967 tide table (SOURCES.md).
+ */
+export const M1_CONDITIONS: MissionConditions = {
+  startTime: '1967-06-03T12:20:00Z',
+  windKn: 9,
+  windFromDeg: 235,
+  hwTime: '1967-06-03T13:35:00Z',
+  hwHeightM: 4.0,
+  lwHeightM: 1.9,
+  sky: 'fair',
+};
 
 /** Where things are (e, n). Heights come from the world. */
 export const M1 = {
@@ -97,7 +112,7 @@ export class Mission1 extends Mission {
 
     // Perches.
     this.addPerch('nest', nest, 'The Nest', 'Resistance stash. Bring food here and press [E].');
-    this.stationPerch = this.addPerch('station', v3(M1.stationRoof.e, M1.stationRoof.n, this.top(M1.stationRoof)), 'Station roof', 'Bayard’s Cove lies south along the river. Hold right mouse to scout.');
+    this.stationPerch = this.addPerch('station', v3(M1.stationRoof.e, M1.stationRoof.n, this.top(M1.stationRoof)), 'Station roof', 'Bayard’s Cove lies south along the river.');
     this.addPerch('church', v3(M1.churchRoof.e, M1.churchRoof.n, this.top(M1.churchRoof)), 'St Saviour’s roof', 'The old town at a glance.');
     this.gutterPerch = this.addPerch('gutter', v3(M1.customGutter.e, M1.customGutter.n, this.top(M1.customGutter)), 'Custom House gutter', 'Right above the dispatch. A calm sentry never looks this high.');
     this.addPerch('chimney', this.world.highestNear(M1.customChimney.e, M1.customChimney.n, 1), 'Custom House chimney', 'Watch his routine from here.');
@@ -218,7 +233,7 @@ export class Mission1 extends Mission {
     // Objectives.
     this.addObjective('takeoff', 'Take off from the nest [Space]');
     this.addObjective('perch', 'Land on the station roof (hold R to glide in)', this.stationPerch.pos, false, 'hidden');
-    this.addObjective('scout', 'Optional: hold right mouse and tag the sentry on Bayard’s Cove', undefined, true, 'hidden');
+    this.addObjective('scout', 'Optional: scout the sentry on Bayard’s Cove (hold right mouse or T on him)', undefined, true, 'hidden');
     this.addObjective('lunch', 'Lunch: snatch a chip or the pasty, then eat it [F] or stash it at the nest', undefined, false, 'hidden');
     this.addObjective('dispatch', 'Steal the courier’s dispatch from the table outside the Custom House', () => this.dispatch.pos, false, 'hidden');
     this.addObjective('deliver', 'Deliver the dispatch to the lobster pot aboard the Dorothy May', this.pot.pos, false, 'hidden');
@@ -226,7 +241,7 @@ export class Mission1 extends Mission {
 
   protected override onStart(): void {
     this.music('mission');
-    this.say('Mother', 'Morning, Scrumpy. Mother here. You’re on the nest. Space to take off when ready.', 6);
+    this.say('Mother', 'Afternoon, Scrumpy. Mother here. You’re on the nest. Space to take off when ready.', 6);
   }
 
   protected override tick(dt: number): void {
@@ -264,6 +279,11 @@ export class Mission1 extends Mission {
         this.setObjectiveTarget('lunch', best ? best.pos : undefined);
       }
     }
+    // Scouting is taught where it can work: within sight and range of the sentry.
+    if (this.objectiveState('scout') === 'active' && !s.tagged && !this.hasSaid('scout_now')) {
+      const d = Math.hypot(s.pos.e - g.pos.e, s.pos.n - g.pos.n, s.pos.h - g.pos.h);
+      if (d < 120 && this.lineOfSight(g.eye(), s.headPosition())) this.sayOnce('scout_now', 'Mother', 'There’s the sentry. Hold right mouse, or T, and keep him in the middle of your view to tag him.', 6);
+    }
     // Narrate the distraction window once per kind.
     if (s.state === GuardState.Distracted) {
       const k = s.distractionKind();
@@ -295,7 +315,7 @@ export class Mission1 extends Mission {
       this.setObjective('scout', 'active');
       this.setObjective('lunch', 'active');
       this.setObjective('dispatch', 'active');
-      this.say('Mother', 'Good landing. Bayard’s Cove is south along the river, past the ferry slip. Hold right mouse to scout and tag the sentry, so we can see what he sees.', 7);
+      this.say('Mother', 'Good landing. Bayard’s Cove is south along the river, past the ferry slip. Fly down there, find a roof with a view, and scout the sentry before you go in.', 7);
       this.after(9, () => this.say('Mother', 'Section G regulations: no operative works on an empty stomach. The clerk on the Embankment bench has chips. The bakery in the cove has a pasty cooling on its sill — tastier, riskier.', 8));
     } else if (p === this.gutterPerch) this.sayOnce('gutter', 'Mother', 'Lovely spot. A calm sentry won’t look up this high — but a suspicious one will. Wait for his back.', 5);
     else if (p === this.lampPerch) this.sayOnce('lamp', 'Mother', 'From here you can see his tea on the barrel. He is very attached to that tea.', 5);

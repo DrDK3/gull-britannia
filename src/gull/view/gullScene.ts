@@ -25,7 +25,9 @@ export type GullCamera = 'chase' | 'first' | 'scenic' | 'orbit' | 'free';
 export const GULL_CAMERAS: GullCamera[] = ['chase', 'first', 'scenic', 'orbit'];
 export const CAMERA_LABEL: Record<GullCamera, string> = { chase: 'Chase', first: 'First person', scenic: 'Scenic', orbit: 'Orbit', free: 'Free' };
 
-const NEAR = 0.05;
+/** Near plane (m): close for the first-person view's own bill; further out otherwise, for ten times the depth precision. */
+const NEAR_FIRST = 0.05;
+const NEAR = 0.25;
 const BLEND_S = 0.6;
 const SUN_COLOUR = new THREE.Color();
 
@@ -179,13 +181,23 @@ export class GullScene {
     return this.lost;
   }
 
+  /** Told when the graphics context is lost (true) and when the browser has restored it (false). */
+  onContextChange?: (lost: boolean) => void;
+
   private readonly onContextLost = (ev: Event) => {
-    ev.preventDefault();
+    ev.preventDefault(); // allow the browser to restore it
     this.lost = true;
+    this.onContextChange?.(true);
   };
 
   private readonly onContextRestored = () => {
     this.lost = false;
+    // The sky's environment map and the horizon colours lived on the lost context: make them again.
+    this.envFor = { el: NaN, cloud: NaN };
+    this.horizon = null;
+    this.applyWeather();
+    if (!this.weather) this.rebuildEnvironment();
+    this.onContextChange?.(false);
   };
 
   setDart(dart: DartScene | undefined): void {
@@ -333,6 +345,11 @@ export class GullScene {
     this.blend = !reduced && was !== mode && mode !== 'orbit' && was !== 'free' ? { p: this.camera.position.clone(), q: this.camera.quaternion.clone(), t: 0 } : undefined;
     this.controls.enabled = mode === 'orbit';
     this.viewModel.visible = mode === 'first';
+    const near = mode === 'first' ? NEAR_FIRST : NEAR;
+    if (this.camera.near !== near) {
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   /** The wheel: zoom the chase and scenic cameras. */

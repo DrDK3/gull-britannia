@@ -83,8 +83,8 @@ export class GameAudio {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     this.master!.gain.setTargetAtTime(this.vol.master, t, 0.05);
-    this.musicBus!.gain.setTargetAtTime(this.vol.music * 0.5, t, 0.05);
-    this.fxBus!.gain.setTargetAtTime(this.vol.effects, t, 0.05);
+    this.musicBus!.gain.setTargetAtTime(this.vol.music * (this.pausedNow ? 0.25 : 0.5), t, 0.05);
+    this.fxBus!.gain.setTargetAtTime(this.pausedNow ? 0 : this.vol.effects, t, 0.05);
   }
 
   private noiseSrc(t: number, dur: number, out: AudioNode, rate = 1): AudioBufferSourceNode {
@@ -287,9 +287,22 @@ export class GameAudio {
     if (this.ctx) this.nextBeat = this.ctx.currentTime + 0.1;
   }
 
+  /** In the pause menu: effects and loops fall silent; the music carries on quietly. */
+  setPaused(paused: boolean): void {
+    this.pausedNow = paused;
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.fxBus!.gain.setTargetAtTime(paused ? 0 : this.vol.effects, t, 0.08);
+    this.musicBus!.gain.setTargetAtTime(this.vol.music * (paused ? 0.25 : 0.5), t, 0.2);
+  }
+
+  private pausedNow = false;
+
   private schedule(): void {
     const ctx = this.ctx;
     if (!ctx || !this.track || ctx.state !== 'running') return;
+    // After the tab was hidden (timers throttled) the schedule is far behind: start again from now, not with a burst.
+    if (this.nextBeat < ctx.currentTime - 0.25) this.nextBeat = ctx.currentTime + 0.05;
     const tempo = { title: 92, mission: 116, free: 100, chase: 152, results: 96 }[this.track] ?? 110;
     const spb = 60 / tempo / 2; // eighth notes
     while (this.nextBeat < ctx.currentTime + 0.15) {

@@ -8,6 +8,7 @@ import { GuardState, type Guard } from '../game/guard';
 import { ItemState, type Item, type ItemKind } from '../game/items';
 import type { Mission, MissionEvent, Npc, Prop } from '../game/mission';
 import type { V3 } from '../game/world';
+import { disposeObject, shared, sharedAll } from '../../render/dispose';
 import { Figure, type FigureStyle } from './figures';
 import { GullModel } from './gullModel';
 import { AllyState, type AllyGull, type Marcher } from '../game/parade';
@@ -15,7 +16,7 @@ import { AllyState, type AllyGull, type Marcher } from '../game/parade';
 type ToScene = (e: number, n: number, h: number, out?: THREE.Vector3) => THREE.Vector3;
 
 const M = (color: number, rough = 0.75, extra: THREE.MeshStandardMaterialParameters = {}) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0, ...extra });
-const MAT = {
+const MAT = sharedAll({
   wood: M(0x7a5a3a),
   darkWood: M(0x4a3626),
   iron: M(0x2b2d30, 0.5, { metalness: 0.4 }),
@@ -39,7 +40,7 @@ const MAT = {
   glass: M(0xfff2b8, 0.2, { emissive: 0x403010 }),
   hullWhite: M(0xe9e6dc, 0.6),
   bottom: M(0x6b2a22, 0.7),
-};
+});
 
 const add = (parent: THREE.Object3D, geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0, shadow = true) => {
   const m = new THREE.Mesh(geo, mat);
@@ -76,6 +77,10 @@ function hull(l: number, b: number, f: number, colour: number): THREE.Group {
   add(g, boot, MAT.bottom, 0, 0.06).scale.set(1.01, 1, 1.005);
   return g;
 }
+
+/** One flattened blob of a splat; four make a splat. Shared by every mission view. */
+const SPLAT_GEO = shared(new THREE.SphereGeometry(1, 8, 4));
+const SPLAT_BLOBS = 400;
 
 function buildProp(p: Prop): THREE.Object3D {
   const g = new THREE.Group();
@@ -340,12 +345,19 @@ export class MissionView {
   private readonly cones = new Map<Guard, THREE.Mesh>();
   private readonly poops: THREE.Mesh[] = [];
   private readonly caps: THREE.Object3D[] = [];
-  private readonly splats: { obj: THREE.Object3D; at?: V3; guard?: Figure }[] = [];
+  /** Splats on people's caps (small meshes that move with them). */
+  private readonly hatSplats: THREE.Object3D[] = [];
+  /** Splats on the ground and roofs: one instanced mesh, four blobs a splat, in metres above datum. */
+  private readonly splatMesh: THREE.InstancedMesh;
+  private readonly splatHolder = new THREE.Group();
+  private splatNext = 0;
   private readonly marker: THREE.Mesh;
   private readonly perchRings: THREE.Mesh[] = [];
   private readonly poopGeo = new THREE.SphereGeometry(0.07, 8, 4);
   private readonly capGeo: THREE.Object3D;
   private t = 0;
+  /** Where each moving thing was before the last game step, to draw between steps. */
+  private readonly prev = new WeakMap<object, { e: number; n: number; h: number; yaw: number }>();
 
   constructor(readonly mission: Mission, private readonly toScene: ToScene) {
     this.group.name = 'mission';
@@ -389,6 +401,12 @@ export class MissionView {
       this.allyModels.set(a, gm);
       this.group.add(gm.root);
     }
+    this.splatMesh = new THREE.InstancedMesh(SPLAT_GEO, MAT.poop, SPLAT_BLOBS);
+    this.splatMesh.count = 0;
+    this.splatMesh.frustumCulled = false;
+    this.splatMesh.name = 'splats';
+    this.splatHolder.add(this.splatMesh);
+    this.group.add(this.splatHolder);
     const cap = new THREE.Group();
     add(cap, new THREE.CylinderGeometry(0.17, 0.13, 0.07, 12), M(0x6f6b45));
     add(cap, new THREE.CylinderGeometry(0.135, 0.135, 0.04, 12), MAT.red, 0, -0.045);
@@ -409,41 +427,118 @@ export class MissionView {
   /** Splats arrive as mission events. */
   onEvent(e: MissionEvent): void {
     if (e.type !== 'splat') return;
-    const s = new THREE.Group();
     const r0 = e.size;
-    for (let i = 0; i < 4; i++) {
-      const r = r0 * (i === 0 ? 0.35 : 0.12 + Math.random() * 0.1);
-      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 8, 4), MAT.poop);
-      m.scale.set(1, 0.18, 1);
-      if (i > 0) {
-        const a = Math.random() * Math.PI * 2;
-        const d = r0 * (0.3 + Math.random() * 0.25);
-        m.position.set(Math.cos(a) * d, 0, Math.sin(a) * d);
-      }
-      s.add(m);
-    }
     const guard = e.guard ? this.mission.guards.find((g) => g.id === e.guard) : undefined;
     const fig = guard ? this.figures.get(guard) : undefined;
     if (fig) {
+      const s = new THREE.Group();
+      for (let i = 0; i < 3; i++) {
+        const r = r0 * (i === 0 ? 0.35 : 0.12 + Math.random() * 0.1);
+        const m = new THREE.Mesh(SPLAT_GEO, MAT.poop);
+        m.scale.set(r, r * 0.18, r);
+        if (i > 0) {
+          const a = Math.random() * Math.PI * 2;
+          const d = r0 * (0.3 + Math.random() * 0.25);
+          m.position.set(Math.cos(a) * d, 0, Math.sin(a) * d);
+        }
+        s.add(m);
+      }
       fig.hat.add(s);
       s.position.set((Math.random() - 0.5) * 0.08, 0.07, (Math.random() - 0.5) * 0.08);
       s.scale.setScalar(0.5);
-      this.splats.push({ obj: s, guard: fig });
-    } else {
-      // Lie on the surface hit.
-      const n = new THREE.Vector3(e.normal.e, e.normal.h, -e.normal.n).normalize();
-      s.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
-      this.group.add(s);
-      this.splats.push({ obj: s, at: { e: e.at.e + e.normal.e * 0.03, n: e.at.n + e.normal.n * 0.03, h: e.at.h + e.normal.h * 0.03 } });
+      this.hatSplats.push(s);
+      if (this.hatSplats.length > 24) this.hatSplats.shift()!.removeFromParent();
+      return;
     }
-    if (this.splats.length > 80) {
-      const old = this.splats.shift()!;
-      old.obj.removeFromParent();
+    // On the surface hit: four flattened blobs, written into the instanced mesh (the oldest are overwritten).
+    const n = new THREE.Vector3(e.normal.e, e.normal.h, -e.normal.n).normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    const centre = new THREE.Vector3(e.at.e + e.normal.e * 0.03, e.at.h + e.normal.h * 0.03, -(e.at.n + e.normal.n * 0.03));
+    const mtx = new THREE.Matrix4();
+    const off = new THREE.Vector3();
+    for (let i = 0; i < 4; i++) {
+      const r = r0 * (i === 0 ? 0.35 : 0.12 + Math.random() * 0.1);
+      off.set(0, 0, 0);
+      if (i > 0) {
+        const a = Math.random() * Math.PI * 2;
+        const d = r0 * (0.3 + Math.random() * 0.25);
+        off.set(Math.cos(a) * d, 0, Math.sin(a) * d).applyQuaternion(q);
+      }
+      mtx.compose(off.add(centre), q, new THREE.Vector3(r, r * 0.18, r));
+      this.splatMesh.setMatrixAt(this.splatNext % SPLAT_BLOBS, mtx);
+      this.splatNext++;
     }
+    this.splatMesh.count = Math.min(this.splatNext, SPLAT_BLOBS);
+    this.splatMesh.instanceMatrix.needsUpdate = true;
   }
 
-  /** Bring the scene up to date with the mission (`camera` for the glints' fade). */
-  sync(dt: number, camera: THREE.Camera): void {
+  /**
+   * Show everything this view can ever draw (vision cones, markers, glints) so the renderer can compile their
+   * shaders ahead of time; call the function it returns to put things back.
+   */
+  revealForWarmUp(): () => void {
+    const hidden: THREE.Object3D[] = [];
+    this.group.traverse((o) => {
+      if (!o.visible) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    });
+    const count = this.splatMesh.count;
+    this.splatMesh.count = Math.max(1, count);
+    return () => {
+      for (const o of hidden) o.visible = false;
+      this.splatMesh.count = count;
+    };
+  }
+
+  /** Remember where everything is, just before a game step (the controller calls this). */
+  snapshot(): void {
+    const m = this.mission;
+    const keep = (o: { pos: V3 }, yaw = 0) => {
+      const p = this.prev.get(o);
+      if (p) {
+        p.e = o.pos.e;
+        p.n = o.pos.n;
+        p.h = o.pos.h;
+        p.yaw = yaw;
+      } else this.prev.set(o, { e: o.pos.e, n: o.pos.n, h: o.pos.h, yaw });
+    };
+    for (const g of m.guards) keep(g, g.bodyYaw);
+    for (const n of m.npcs) keep(n, n.yaw);
+    for (const mm of m.marchers) keep(mm, mm.yaw);
+    for (const a of m.allies) keep(a, a.yaw);
+    for (const p of m.poops) keep(p);
+    for (const t of m.thrown) keep(t);
+    for (const it of m.items) if (it.state === ItemState.Loose) keep(it, it.yaw);
+  }
+
+  /** A thing's position `alpha` of the way from before the last step to now (scene coordinates). */
+  private at(o: { pos: V3 }, alpha: number, out = new THREE.Vector3(), lift = 0): THREE.Vector3 {
+    const p = this.prev.get(o);
+    if (!p || alpha >= 1) return this.toScene(o.pos.e, o.pos.n, o.pos.h + lift, out);
+    return this.toScene(p.e + (o.pos.e - p.e) * alpha, p.n + (o.pos.n - p.n) * alpha, p.h + (o.pos.h - p.h) * alpha + lift, out);
+  }
+
+  private yawAt(o: object, yaw: number, alpha: number): number {
+    const p = this.prev.get(o);
+    if (!p || alpha >= 1) return yaw;
+    return p.yaw + Math.atan2(Math.sin(yaw - p.yaw), Math.cos(yaw - p.yaw)) * alpha;
+  }
+
+  /** Where a guard's or a person's head is drawn now, in game coordinates (for the HUD's labels). */
+  headOf(o: { pos: V3 }, alpha: number, lift: number): V3 {
+    const p = this.prev.get(o);
+    const a = !p || alpha >= 1 ? 1 : alpha;
+    const q = p ?? { e: o.pos.e, n: o.pos.n, h: o.pos.h };
+    return { e: q.e + (o.pos.e - q.e) * a, n: q.n + (o.pos.n - q.n) * a, h: q.h + (o.pos.h - q.h) * a + lift };
+  }
+
+  /**
+   * Bring the scene up to date with the mission, `alpha` of the way from the previous game step to the latest one.
+   * `bill` is where the gull's bill is drawn (what it carries hangs there); `camera` is for the glints' fade.
+   */
+  sync(dt: number, camera: THREE.Camera, alpha = 1, bill?: { pos: THREE.Vector3; yaw: number }): void {
     this.t += dt;
     const m = this.mission;
     const v = new THREE.Vector3();
@@ -463,8 +558,23 @@ export class MissionView {
         if (glint) glint.visible = false;
         continue;
       }
-      this.toScene(it.pos.e, it.pos.n, it.pos.h, obj.position);
-      obj.rotation.y = -it.yaw;
+      if (it.state === ItemState.Held && bill) {
+        // In the bill, wherever the gull is drawn this frame.
+        obj.position.copy(bill.pos);
+        obj.position.y -= 0.02;
+        obj.rotation.y = -bill.yaw + Math.PI / 2;
+      } else if (it.state === ItemState.CarriedByGuard) {
+        const g = m.guards.find((x) => x.carrying === it);
+        const f = g && this.figures.get(g);
+        if (f) {
+          f.handR.updateWorldMatrix(true, false);
+          obj.position.setFromMatrixPosition(f.handR.matrixWorld);
+        } else this.toScene(it.pos.e, it.pos.n, it.pos.h, obj.position);
+        obj.rotation.y = -it.yaw;
+      } else {
+        this.at(it, it.state === ItemState.Loose ? alpha : 1, obj.position);
+        obj.rotation.y = -it.yaw;
+      }
       obj.scale.setScalar(it.state === ItemState.Held ? it.heldScale : 1);
       if (glint) {
         const near = camera.position.distanceTo(obj.position) < 60;
@@ -475,33 +585,33 @@ export class MissionView {
     }
     for (const [who, f] of this.figures) {
       const isGuard = 'routine' in who;
-      const pos = this.toScene(who.pos.e, who.pos.n, who.pos.h);
+      const pos = this.at(who, alpha);
       if (isGuard) {
         const g = who as Guard;
-        f.pose(pos, g.bodyYaw, { anim: g.anim, phase: g.phase, moving: g.moving, running: g.runningNow, time: g.time, headYaw: g.headYaw, headPitch: g.headPitch });
+        f.pose(pos, this.yawAt(g, g.bodyYaw, alpha), { anim: g.anim, phase: g.phase, moving: g.moving, running: g.runningNow, time: g.time, headYaw: g.headYaw, headPitch: g.headPitch });
         f.mug.visible = g.mugInHand;
         const cone = this.cones.get(g)!;
         const near = camera.position.distanceTo(pos) < 140;
         cone.visible = g.tagged && near;
         if (cone.visible) {
           cone.position.copy(pos).add(v.set(0, 0.08, 0));
-          cone.rotation.y = -g.facingYaw();
+          cone.rotation.y = -(this.yawAt(g, g.bodyYaw, alpha) + g.headYaw);
           (cone.material as THREE.MeshBasicMaterial).color.set(CONE_COLOURS[g.state] ?? 0xffffff);
           const r = g.viewRange * (g.alarmTimer > 0 ? 1.25 : 1);
           cone.scale.setScalar(r / g.viewRange);
         }
       } else {
         const n = who as Npc;
-        f.pose(pos, n.yaw, { anim: n.anim, phase: n.phase, moving: n.moving, running: false, time: n.phase, headYaw: n.headYaw, headPitch: n.headPitch });
+        f.pose(pos, this.yawAt(n, n.yaw, alpha), { anim: n.anim, phase: n.phase, moving: n.moving, running: false, time: n.phase, headYaw: n.headYaw, headPitch: n.headPitch });
       }
     }
     for (const [mm, f] of this.marchFigs) {
-      f.pose(this.toScene(mm.pos.e, mm.pos.n, mm.pos.h), mm.yaw, { anim: mm.anim, phase: mm.phase, moving: mm.moving, running: mm.running, time: this.t + mm.slot.x, headYaw: 0, headPitch: 0 });
+      f.pose(this.at(mm, alpha), this.yawAt(mm, mm.yaw, alpha), { anim: mm.anim, phase: mm.phase, moving: mm.moving, running: mm.running, time: this.t + mm.slot.x, headYaw: 0, headPitch: 0 });
       f.hat.visible = !mm.capOff;
     }
     for (const [a, gm] of this.allyModels) {
       const airborne = a.state !== AllyState.Roost;
-      gm.pose(this.toScene(a.pos.e, a.pos.n, airborne ? a.pos.h : a.pos.h - 0.13), a.yaw, Math.atan2(a.vel.h, Math.max(1, Math.hypot(a.vel.e, a.vel.n))) * 0.6, {
+      gm.pose(this.at(a, alpha, undefined, airborne ? 0 : -0.13), this.yawAt(a, a.yaw, alpha), Math.atan2(a.vel.h, Math.max(1, Math.hypot(a.vel.e, a.vel.n))) * 0.6, {
         time: this.t + a.slot.x,
         airborne,
         flapPhase: a.flapPhase,
@@ -526,7 +636,7 @@ export class MissionView {
       const p = m.poops[i];
       mesh.visible = !!p;
       if (p) {
-        this.toScene(p.pos.e, p.pos.n, p.pos.h, mesh.position);
+        this.at(p, alpha, mesh.position);
         mesh.scale.set(1, 1 + Math.min(Math.hypot(p.vel.e, p.vel.n, p.vel.h) * 0.05, 0.8), 1);
       }
     });
@@ -540,11 +650,12 @@ export class MissionView {
       const t = m.thrown[i];
       c.visible = !!t;
       if (t) {
-        this.toScene(t.pos.e, t.pos.n, t.pos.h, c.position);
+        this.at(t, t.landed ? 1 : alpha, c.position);
         c.rotation.set(t.landed ? 0 : Math.sin(t.life * 9) * 0.4, t.spin, 0);
       }
     });
-    for (const s of this.splats) if (s.at) this.toScene(s.at.e, s.at.n, s.at.h, s.obj.position);
+    // The splat mesh is in metres above datum; the scene's zero is the water.
+    this.splatHolder.position.y = this.toScene(0, 0, 0, v).y;
     // The objective's marker and highlighted perches.
     const target = m.running ? m.currentTarget() : undefined;
     this.marker.visible = !!target;
@@ -571,9 +682,8 @@ export class MissionView {
 
   dispose(): void {
     this.group.removeFromParent();
-    this.group.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      if (mesh.isMesh) mesh.geometry.dispose();
-    });
+    // Geometries, this mission's own materials and its canvas textures (name plates, banners); shared ones stay.
+    disposeObject(this.group);
+    this.poopGeo.dispose();
   }
 }

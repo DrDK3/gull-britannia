@@ -70,6 +70,7 @@ function suite() {
 
   // ---------------------------------------------------------------- Mission 1, flown
   game.startOperation('m1');
+  game.begin('keys');
   game.frozen = true;
   let m = game.mission;
   check('m1: starts on the nest', m.gull.mode === 0 && m.gull.pos.h > 15, m.gull.pos.h.toFixed(1));
@@ -118,6 +119,7 @@ function suite() {
 
   // ---------------------------------------------------------------- Mission 1, the tea
   game.startOperation('m1');
+  game.begin('keys');
   m = game.mission;
   m.skipTutorial();
   m.sentry.jumpToStep(0);
@@ -133,6 +135,7 @@ function suite() {
 
   // ---------------------------------------------------------------- Mission 2
   game.startOperation('m2');
+  game.begin('keys');
   m = game.mission;
   check('m2: Bomber lead, six drops', m.gull.profile.maxPayload === 6);
   // From the mooring pile behind the stand (from the station roof its own turret is in the way; from the pavement
@@ -175,6 +178,7 @@ function suite() {
 
   // ---------------------------------------------------------------- restart
   game.startOperation('m1');
+  game.begin('keys');
   m = game.mission;
   check('restart: a fresh mission', m.stats.drops === 0 && m.objectiveState('takeoff') === 'active' && m.dispatch.state === 0 && m.sentry.state === 0);
   game.toTitle();

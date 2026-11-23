@@ -14,6 +14,20 @@ import { World, add, closestOnSegment, dist, dist2d, scale, v3, type Solid, type
 
 export type Tone = 'good' | 'food' | 'warn' | 'bad' | 'info';
 
+/** The day an operation happens on: its clock, wind, tide and sky. The controller builds the scene's weather from it. */
+export interface MissionConditions {
+  /** When the operation starts (ISO, UTC). */
+  startTime: string;
+  windKn: number;
+  /** Where the wind blows from (degrees true). */
+  windFromDeg: number;
+  /** A high water near the start, and the heights of high and low water that day (m above chart datum). */
+  hwTime: string;
+  hwHeightM: number;
+  lwHeightM: number;
+  sky: 'clear' | 'fair' | 'hazy' | 'overcast';
+}
+
 export type MissionEvent =
   | { type: 'radio'; speaker: string; text: string; dur: number }
   | { type: 'toast'; text: string; tone: Tone }

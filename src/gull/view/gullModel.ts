@@ -77,6 +77,8 @@ export class GullModel {
   private readonly wings: Wing[] = [];
   private readonly legs: THREE.Group[] = [];
   private readonly head = new THREE.Group();
+  /** The tip of the bill: what the gull carries hangs here. */
+  private readonly billTip = new THREE.Object3D();
   private readonly tail: THREE.Mesh;
   /** Smoothed wing pose: spread 0 folded … 1 open; sweep back; dihedral. */
   private spread = 0;
@@ -122,7 +124,8 @@ export class GullModel {
       e.position.set(s * 0.044, 0.016, -0.03);
       this.head.add(e);
     }
-    this.head.add(skull, neck, billMesh, gonys);
+    this.billTip.position.set(0, -0.022, -0.135);
+    this.head.add(skull, neck, billMesh, gonys, this.billTip);
     this.body.add(this.head);
 
     // Tail: a short white fan.
@@ -172,6 +175,12 @@ export class GullModel {
     this.root.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.receiveShadow = false;
     });
+  }
+
+  /** Where the tip of the bill is in the scene now (call after `pose`). */
+  billPosition(out = new THREE.Vector3()): THREE.Vector3 {
+    this.billTip.updateWorldMatrix(true, false);
+    return out.setFromMatrixPosition(this.billTip.matrixWorld);
   }
 
   /** The first-person view's own bill, at the bottom of the picture (add to the camera). */

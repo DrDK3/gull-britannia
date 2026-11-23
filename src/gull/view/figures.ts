@@ -4,6 +4,7 @@
  * for the guards' routines and reactions. Feet at the group's origin; facing −z (turned by the compass yaw).
  */
 import * as THREE from 'three';
+import { shared } from '../../render/dispose';
 
 export type FigureStyle = 'soldier' | 'officer' | 'cook' | 'civilian' | 'sailor';
 
@@ -19,7 +20,7 @@ const matCache = new Map<number, THREE.MeshStandardMaterial>();
 const mat = (c: number) => {
   let m = matCache.get(c);
   if (!m) {
-    m = new THREE.MeshStandardMaterial({ color: c, roughness: 0.82, metalness: 0 });
+    m = shared(new THREE.MeshStandardMaterial({ color: c, roughness: 0.82, metalness: 0 }));
     matCache.set(c, m);
   }
   return m;

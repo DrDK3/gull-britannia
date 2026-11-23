@@ -1,8 +1,14 @@
 /**
- * The game controller: loads the River Dart (SailSim's data and scene, taken back to 1967), reads the town's solid
- * shape from the picture, and runs the current mission at a fixed 60 Hz with the view interpolated between steps.
- * Screens: loading → title → briefing → playing (pause) → results. Input is the keyboard and the mouse (pointer
- * lock), with the arrow keys to look. The React UI subscribes to `state`.
+ * The game controller: loads the River Dart (SailSim's data and scene, taken back to 1967) and the baked solid town,
+ * and runs the current mission at a fixed 60 Hz with the view interpolated between steps.
+ *
+ * Screens: loading → title → briefing → playing → results. While playing there is a gate:
+ *
+ *   READY ──click, Space or "keyboard only"──▶ FLYING ──Esc, P, lost mouse capture, hidden tab──▶ PAUSED ──Resume──▶ FLYING
+ *
+ * The mission's clock, guards, radio and timers run only in FLYING, so nothing happens before the player has control.
+ * Input is the keyboard and the mouse (pointer lock), or the keyboard alone (arrow keys look). The React UI subscribes
+ * to `state`.
  */
 import * as THREE from 'three';
 import { loadDartData, type DartData } from '../../app/geoLoader';
@@ -10,21 +16,20 @@ import { DartScene } from '../../render/dart';
 import { DynamicResolution } from '../../render/dynamicResolution';
 import { presetSettings, type GraphicsPreset } from '../../render/graphics';
 import { buildConditions, DEFAULT_CONDITIONS, type BuiltConditions } from '../../sim/env/conditions';
+import { presetSky } from '../../sim/env/sky';
 import { sunPosition } from '../../sim/env/sun';
 import { RDYC_ORIGIN } from '../../sim/geo/projection';
-import { presetSky } from '../../sim/env/sky';
-import { FreeFlight } from '../game/free';
 import { GuardState } from '../game/guard';
 import { Mode, NO_CONTROLS, type GullControls } from '../game/gull';
-import { Mission1 } from '../game/m1';
-import { Mission2 } from '../game/m2';
+import { M1_CONDITIONS } from '../game/m1';
+import type { Mission, MissionConditions, MissionEvent, Results, Tone } from '../game/mission';
+import { conditionsFor, createMission } from '../game/operations';
 import { AllyState } from '../game/parade';
-import type { Mission, MissionEvent, Results, Tone } from '../game/mission';
 import { World } from '../game/world';
+import { gridToInt16, loadCollision } from '../view/collisionData';
 import { data1967 } from '../view/era1967';
 import { GullModel } from '../view/gullModel';
 import { CAMERA_LABEL, GULL_CAMERAS, GullScene, type GullCamera, type GullPose } from '../view/gullScene';
-import { gridToInt16, loadCollision } from '../view/collisionData';
 import { captureHeights, type CaptureArea } from '../view/heightCapture';
 import { MissionView } from '../view/missionView';
 import { GameAudio } from './audio';
@@ -43,18 +48,11 @@ export const CAPTURE_AREAS: CaptureArea[] = [
   { e0: -640, n0: -80, e1: -200, n1: 640, cell: 0.5, ss: 2 },
 ];
 
-/** A June afternoon in 1967: high water a little after one, a light south-westerly, fair skies. */
-export const START_TIME = '1967-06-03T12:20:00Z';
-const CONDITIONS = {
-  ...DEFAULT_CONDITIONS,
-  startTime: START_TIME,
-  weather: { source: 'manual' as const, twsKn: 9, twdDeg: 235 },
-  gusts: { preset: 'steady' as const, seed: 1967 },
-  tide: { mode: 'manual' as const, hwTime: '1967-06-03T12:05:00Z', hwHeightM: 4.7, lwHeightM: 0.9 },
-  sky: { source: 'preset' as const, preset: 'fair' as const },
-};
-
 export type Screen = 'loading' | 'title' | 'briefing' | 'playing' | 'results' | 'error';
+/** While playing: waiting for the player to take control, in control, or in the pause menu. */
+export type Gate = 'ready' | 'flying' | 'paused';
+/** How the player steers: the mouse (captured) with the keyboard, or the keyboard alone (arrow keys look). */
+export type InputMode = 'mouse' | 'keys';
 
 export interface HudState {
   speedKmh: number;
@@ -63,7 +61,7 @@ export interface HudState {
   payload: number;
   maxPayload: number;
   heading: number;
-  drop?: { x: number; y: number; onTarget: boolean };
+  drop?: { onTarget: boolean };
   /** The objective marker's direction when it is off screen (rad, 0 = up, clockwise). */
   offscreen?: number;
   beak?: string;
@@ -71,10 +69,10 @@ export interface HudState {
 
 export interface GuardOverlay {
   id: string;
-  x: number;
-  y: number;
   name?: string;
-  routine?: string;
+  /** A tagged guard's routine, step by step, and which step he is on (−1 when off his routine). */
+  routine?: string[];
+  routineStep?: number;
   state: string;
   /** 0…1 */
   suspicion: number;
@@ -88,8 +86,17 @@ export interface GameState {
   progress: string;
   error?: string;
   issues: string[];
+  gate: Gate;
+  inputMode: InputMode;
+  /** Mouse capture was refused this many times in a row (the Ready card explains). */
+  captureRefused: number;
   locked: boolean;
+  /** In the pause menu (gate === 'paused'). */
   paused: boolean;
+  /** The graphics context is lost: nothing can be drawn until the browser restores it. */
+  contextLost: boolean;
+  /** `?debug`: show the frame rate and camera readout. */
+  debug: boolean;
   camera: GullCamera;
   cameraLabel: string;
   hud: HudState;
@@ -124,6 +131,7 @@ const KEYS: Record<string, keyof GullControls> = {
   ShiftLeft: 'dive',
   ShiftRight: 'dive',
   KeyR: 'land',
+  KeyT: 'scout',
 };
 
 export class GullGame {
@@ -137,10 +145,22 @@ export class GullGame {
   readonly model = new GullModel();
   readonly audio = new GameAudio();
   settings: Settings = loadSettings();
-  /** Run time (s) since the scene started (the clock, the tide). */
+  /** Seconds since the current operation's clock started (or since the title scene's did). */
   time = 0;
   /** Tests and screenshots: hold the game still without the pause menu. */
   frozen = false;
+  /**
+   * Switches in the page's address: `?debug` shows the frame rate and camera readout; `?survey` reads the town's solid
+   * shape from the picture on this machine instead of loading the baked one; `?bake` does that at full scenery detail
+   * for tools/bake-collision.ts.
+   */
+  readonly flags = (() => {
+    const q = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
+    return { debug: q.has('debug'), survey: q.has('survey') || q.has('bake'), bake: q.has('bake') };
+  })();
+  /** How the solid town was obtained this visit. */
+  collisionSource: 'baked' | 'surveyed' = 'baked';
+
   private readonly listeners = new Set<() => void>();
   private st: GameState;
   private readonly keys = new Set<string>();
@@ -149,12 +169,13 @@ export class GullGame {
   private accumulator = 0;
   private lastFrame = 0;
   private raf = 0;
-  private prev = { e: 0, n: 0, h: 0, yaw: 0 };
+  private prev = { e: 0, n: 0, h: 0 };
   private readonly dropRing: THREE.Mesh;
   private dropOnTarget = false;
   private readonly dynRes = new DynamicResolution();
   private fpsAcc = { n: 0, t: 0, fps: 0 };
   private publishT = 0;
+  private weatherT = 0;
   private resizeObs?: ResizeObserver;
   private seq = 0;
   private radioTimer = 0;
@@ -162,14 +183,31 @@ export class GullGame {
   private readonly radioQueue: { speaker: string; text: string; dur: number }[] = [];
   private readonly toastTimers = new Map<number, number>();
   private titleT = 0;
+  /** The current operation's clock zero (ms since 1970). */
+  private startEpoch = Date.parse(M1_CONDITIONS.startTime);
+  /** The mission has been started (Mother has spoken, the clock runs when flying). */
+  private started = false;
+  /** Which operation `mission` was built for. */
+  private builtFor?: string;
+  /** The player asked for the mouse and the browser has not answered yet. */
+  private wantCapture = false;
+  /** When mouse capture last ended (ms), to ignore the Escape that some browsers deliver with it. */
+  private captureEndedAt = -1e9;
+  /** HUD elements pinned to things in the world (guards' labels, speech, ON TARGET): the UI registers them here. */
+  private readonly anchors = new Map<string, HTMLElement>();
 
   constructor() {
     this.st = {
       screen: 'loading',
       progress: 'Loading the River Dart…',
       issues: [],
+      gate: 'ready',
+      inputMode: 'mouse',
+      captureRefused: 0,
       locked: false,
       paused: false,
+      contextLost: false,
+      debug: this.flags.debug,
       camera: 'chase',
       cameraLabel: CAMERA_LABEL.chase,
       hud: { speedKmh: 0, altitude: 0, mode: '', payload: 3, maxPayload: 3, heading: 0 },
@@ -209,25 +247,18 @@ export class GullGame {
 
   // ------------------------------------------------------------------ start-up
 
-  /**
-   * Switches in the page's address: `?debug` shows the frame rate and camera readout; `?survey` reads the town's solid
-   * shape from the picture on this machine instead of loading the baked one; `?bake` does that at full scenery detail
-   * for tools/bake-collision.ts.
-   */
-  readonly flags = (() => {
-    const q = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
-    return { debug: q.has('debug'), survey: q.has('survey') || q.has('bake'), bake: q.has('bake') };
-  })();
-  /** How the solid town was obtained this visit. */
-  collisionSource: 'baked' | 'surveyed' = 'baked';
-
   async attach(container: HTMLElement): Promise<void> {
     try {
       await this.boot(container);
     } catch (e) {
       console.error(e);
-      this.publish({ screen: 'error', error: `Something went wrong while loading: ${(e as Error).message ?? e}` });
+      this.fail(`Something went wrong while loading: ${(e as Error).message ?? e}`);
     }
+  }
+
+  private fail(error: string, issues: string[] = this.st.issues): void {
+    cancelAnimationFrame(this.raf);
+    this.publish({ screen: 'error', error, issues });
   }
 
   /** The grids as the bake stores them (Int16 centimetres), base64 (tools/bake-collision.ts). */
@@ -253,10 +284,11 @@ export class GullGame {
     try {
       view = new GullScene(container);
     } catch (e) {
-      this.publish({ screen: 'error', error: `WebGL could not start: ${(e as Error).message}` });
+      this.fail(`This browser could not start WebGL, which the game needs to draw (${(e as Error).message}). Try another browser, or turn on hardware acceleration.`);
       return;
     }
     this.view = view;
+    view.onContextChange = (lost) => this.onContext(lost);
     this.publish({ graphics: view.graphics.preset });
     view.game.add(this.model.root, this.dropRing);
     view.viewModel.add(this.model.viewBeak());
@@ -269,11 +301,11 @@ export class GullGame {
     this.data = data;
     const issues = data.issues.map((i) => `${i.asset}: ${i.message} (${i.effect})`);
     if (!data.geo || !data.manifest) {
-      this.publish({ screen: 'error', error: 'The River Dart data could not be loaded.', issues });
+      this.fail('The River Dart’s map data could not be loaded. Check the connection and try again.', issues);
       return;
     }
     performance.mark('gb:data');
-    this.conditions = buildConditions(CONDITIONS, data.geo);
+    this.applyConditions(M1_CONDITIONS);
     this.publish({ progress: 'Raising the town…', issues });
     await nextFrame();
     const dart = new DartScene({ manifest: data.manifest, geo: data.geo, features: data.features, drape: data.drape, town: data.town, waterMask: data.waterMask, roads: data.roads, quays: data.quays, detail: this.flags.bake ? 'high' : view.quality, era: '1967' });
@@ -308,12 +340,33 @@ export class GullGame {
     performance.mark('gb:title');
   }
 
+  // ------------------------------------------------------------------ the day: clock, tide, sky
+
+  /** Start the clock of an operation's day and build its wind, tide and sky. */
+  private applyConditions(c: MissionConditions): void {
+    this.startEpoch = Date.parse(c.startTime);
+    this.time = 0;
+    this.conditions = buildConditions(
+      {
+        ...DEFAULT_CONDITIONS,
+        startTime: c.startTime,
+        weather: { source: 'manual', twsKn: c.windKn, twdDeg: c.windFromDeg },
+        gusts: { preset: 'steady', seed: 1967 },
+        tide: { mode: 'manual', hwTime: c.hwTime, hwHeightM: c.hwHeightM, lwHeightM: c.lwHeightM },
+        sky: { source: 'preset', preset: c.sky },
+      },
+      this.data?.geo,
+    );
+    if (this.world) this.world.waterLevel = this.waterLevel();
+    this.view?.setWeather(this.sceneWeather());
+  }
+
   waterLevel(): number {
-    return this.conditions?.env.waterLevel?.(this.time) ?? 2;
+    return this.conditions?.env.waterLevel?.(this.time) ?? 1.3;
   }
 
   epochMs(): number {
-    return Date.parse(START_TIME) + this.time * 1000;
+    return this.startEpoch + this.time * 1000;
   }
 
   private sceneWeather() {
@@ -323,7 +376,7 @@ export class GullGame {
 
   // ------------------------------------------------------------------ screens
 
-  /** The title and briefing screens: a slow flight round the harbour. */
+  /** The title, briefing and review screens: a slow flight round the harbour. */
   private titleCamera(dt: number): void {
     this.titleT += dt * (this.settings.reducedMotion ? 0.3 : 1);
     const a = this.titleT * 0.025 + 2.2;
@@ -336,50 +389,88 @@ export class GullGame {
     if (!op?.playable) return;
     this.audio.unlock();
     this.publish({ screen: 'briefing', operation: id, operationTitle: op.title, briefing: BRIEFINGS[id], results: undefined });
+    // Build the operation and compile what it draws while the dossier is being read, so it starts without a stall.
+    this.buildMission(id);
+    void this.warmMission();
   }
 
-  /** Start (or restart) an operation; 'free' for free flight. */
-  startOperation(id: string): void {
+  /** Build an operation's world: its day, its mission and what the mission draws. It is not started. */
+  private buildMission(id: string): void {
     const world = this.world;
     const view = this.view;
     if (!world || !view) return;
-    this.audio.unlock();
     this.endMission();
     world.solids.splice(0, world.solids.length);
-    world.waterLevel = this.waterLevel();
-    const m: Mission = id === 'm1' ? new Mission1(world).init() : id === 'm2' ? new Mission2(world).init() : new FreeFlight(world).init();
+    this.applyConditions(conditionsFor(id));
+    const m = createMission(id, world);
     this.mission = m;
+    this.builtFor = id;
+    this.started = false;
     this.missionView = new MissionView(m, (e, n, h, out) => view.toScene(e, n, h, out));
     view.game.add(this.missionView.group);
     this.snapPrev();
+  }
+
+  /** Compile the shaders of everything the mission can draw (vision cones and markers included). */
+  private async warmMission(): Promise<void> {
+    const v = this.view;
+    const mv = this.missionView;
+    if (!v || !mv) return;
+    const restore = mv.revealForWarmUp();
+    try {
+      await v.warmUp();
+    } catch {
+      /* compiled at first draw instead */
+    } finally {
+      restore();
+    }
+  }
+
+  /** Enter an operation (or free flight, 'free') at the Ready gate: the scene is shown, nothing runs yet. */
+  startOperation(id: string): void {
+    if (!this.world || !this.view) return;
+    this.audio.unlock();
+    if (this.builtFor !== id || this.started || !this.mission) this.buildMission(id);
+    const m = this.mission;
+    if (!m) return;
     this.keys.clear();
     this.poopHeld = this.mouseScout = false;
     this.radioQueue.length = 0;
     this.radioTimer = 0;
+    this.accumulator = 0;
     this.setCamera(this.st.camera === 'scenic' || this.st.camera === 'orbit' ? 'chase' : this.st.camera);
-    m.start();
-    this.drainEvents();
-    this.publish({ screen: 'playing', operation: id, operationTitle: m.title, paused: false, results: undefined, toasts: [], banner: undefined });
-    void this.lockPointer();
+    this.audio.setPaused(false);
+    this.publish({ screen: 'playing', gate: 'ready', paused: false, captureRefused: 0, operation: id, operationTitle: m.title, results: undefined, radio: undefined, toasts: [], banner: undefined, overlays: [] });
+    this.publishHud(m);
   }
 
   private endMission(): void {
     this.missionView?.dispose();
     this.missionView = undefined;
     this.mission = undefined;
+    this.builtFor = undefined;
+    this.started = false;
+    this.anchors.clear();
     this.audio.stopAll();
   }
 
   /** Abandon to the title screen. */
   toTitle(): void {
     this.endMission();
+    this.wantCapture = false;
     if (document.pointerLockElement) document.exitPointerLock();
+    this.applyConditions(M1_CONDITIONS);
+    this.audio.setPaused(false);
     this.audio.music('title');
-    this.publish({ screen: 'title', paused: false, results: undefined, radio: undefined, toasts: [], banner: undefined, overlays: [] });
+    this.publish({ screen: 'title', gate: 'ready', paused: false, results: undefined, radio: undefined, toasts: [], banner: undefined, overlays: [] });
   }
 
+  /** Start the operation again, and take control at once (the click on Restart or Try again allows it). */
   restart(): void {
-    this.startOperation(this.st.operation ?? 'free');
+    const id = this.st.operation ?? 'free';
+    this.buildMission(id);
+    this.startOperation(id);
+    this.begin();
   }
 
   private onFinished(r: Results): void {
@@ -388,9 +479,112 @@ export class GullGame {
     const best = saved.best[r.missionId];
     if (!best || r.total > best.total) saved.best[r.missionId] = { total: r.total, grade: r.grade };
     saveProgress(saved);
+    this.wantCapture = false;
     if (document.pointerLockElement) document.exitPointerLock();
     this.audio.music('results');
     this.publish({ screen: 'results', results: r, saved, radio: undefined, overlays: [] });
+  }
+
+  // ------------------------------------------------------------------ the gate: ready, flying, paused
+
+  /**
+   * Take control and fly: from the Ready gate or the pause menu. With the mouse, the game waits for the browser to
+   * grant the capture; with the keyboard alone it starts at once.
+   */
+  begin(mode: InputMode = this.st.inputMode): void {
+    if (this.st.screen !== 'playing' || this.st.gate === 'flying' || this.st.contextLost) return;
+    this.audio.unlock();
+    if (mode !== this.st.inputMode) this.publish({ inputMode: mode });
+    if (mode === 'keys') {
+      this.enterFlying();
+      return;
+    }
+    const canvas = this.view?.renderer.domElement;
+    if (!canvas) return;
+    if (document.pointerLockElement === canvas) {
+      this.enterFlying();
+      return;
+    }
+    this.wantCapture = true;
+    let asked: unknown;
+    try {
+      asked = canvas.requestPointerLock();
+    } catch {
+      this.captureRefused();
+      return;
+    }
+    // Newer browsers answer with a promise; older ones with the pointerlockchange and pointerlockerror events.
+    if (asked instanceof Promise) asked.catch(() => this.captureRefused());
+  }
+
+  private captureRefused(): void {
+    if (!this.wantCapture) return;
+    this.wantCapture = false;
+    this.publish({ captureRefused: this.st.captureRefused + 1 });
+  }
+
+  private enterFlying(): void {
+    const m = this.mission;
+    if (!m || this.st.screen !== 'playing') return;
+    this.wantCapture = false;
+    this.keys.clear();
+    this.poopHeld = this.mouseScout = false;
+    this.lastFrame = performance.now();
+    this.accumulator = 0;
+    this.audio.setPaused(false);
+    this.publish({ gate: 'flying', paused: false, captureRefused: 0 });
+    if (!this.started) {
+      this.started = true;
+      m.start();
+      this.drainEvents();
+    }
+  }
+
+  /** To the pause menu (from flying). */
+  pause(): void {
+    if (this.st.screen !== 'playing' || this.st.gate !== 'flying') return;
+    this.keys.clear();
+    this.poopHeld = this.mouseScout = false;
+    this.wantCapture = false;
+    this.audio.setPaused(true);
+    this.publish({ gate: 'paused', paused: true });
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  /** From the pause menu back to flying (the mouse is captured again first). */
+  resume(): void {
+    if (this.st.gate === 'paused') this.begin();
+  }
+
+  /** From the pause menu to the Ready gate: the scene, and one click to fly. */
+  toReady(): void {
+    if (this.st.screen !== 'playing' || this.st.gate !== 'paused') return;
+    this.publish({ gate: 'ready', paused: false });
+  }
+
+  /** Kept for tests and older callers: pause or resume. */
+  setPaused(paused: boolean): void {
+    if (paused) this.pause();
+    else this.resume();
+  }
+
+  private onContext(lost: boolean): void {
+    if (lost) {
+      this.pause();
+      this.publish({ contextLost: true });
+    } else {
+      this.view?.setWeather(this.sceneWeather());
+      this.publish({ contextLost: false });
+    }
+  }
+
+  async toggleFullscreen(): Promise<void> {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch {
+      /* not allowed here (an embedding page may forbid it) */
+    }
   }
 
   // ------------------------------------------------------------------ input
@@ -400,20 +594,27 @@ export class GullGame {
     canvas.tabIndex = 0;
     canvas.addEventListener('click', () => {
       this.audio.unlock();
-      if (this.st.screen === 'playing' && !this.st.paused && document.pointerLockElement !== canvas) void this.lockPointer();
+      // A click on the picture takes control (the Ready card does the same).
+      if (this.st.screen === 'playing' && this.st.gate === 'ready') this.begin('mouse');
     });
     document.addEventListener('pointerlockchange', () => {
       const locked = document.pointerLockElement === canvas;
-      if (!locked && this.st.locked && this.st.screen === 'playing') this.setPaused(true);
       this.publish({ locked });
+      if (locked) {
+        if (this.wantCapture && this.st.screen === 'playing') this.enterFlying();
+      } else {
+        this.captureEndedAt = performance.now();
+        if (this.st.screen === 'playing' && this.st.gate === 'flying' && this.st.inputMode === 'mouse') this.pause();
+      }
     });
+    document.addEventListener('pointerlockerror', () => this.captureRefused());
     document.addEventListener('mousemove', (ev) => {
-      if (document.pointerLockElement !== canvas || this.st.paused || !this.mission) return;
+      if (document.pointerLockElement !== canvas || this.st.gate !== 'flying' || !this.mission) return;
       const k = this.settings.sensitivity / 1000;
       this.mission.gull.look(ev.movementX * k, -ev.movementY * k * (this.settings.invertY ? -1 : 1));
     });
     document.addEventListener('mousedown', (ev) => {
-      if (document.pointerLockElement !== canvas) return;
+      if (document.pointerLockElement !== canvas || this.st.gate !== 'flying') return;
       if (ev.button === 0) this.poopHeld = true;
       if (ev.button === 2) this.mouseScout = true;
     });
@@ -433,11 +634,23 @@ export class GullGame {
     window.addEventListener('keydown', (ev) => {
       if ((ev.target as HTMLElement | null)?.closest?.('input, select, textarea')) return;
       if (this.st.screen !== 'playing') return;
+      const gate = this.st.gate;
       if (ev.code === 'Escape' || ev.code === 'KeyP') {
-        this.setPaused(!this.st.paused);
+        // Some browsers deliver the Escape that released the mouse as a key press too: one pause, not pause and back.
+        if (ev.code === 'Escape' && performance.now() - this.captureEndedAt < 300) return;
+        if (gate === 'flying') this.pause();
+        else if (gate === 'paused') this.toReady();
         return;
       }
-      if (this.st.paused) return;
+      if (gate === 'ready') {
+        // Space or Enter at the Ready gate takes control, unless a button there has the focus (it handles them itself).
+        if ((ev.code === 'Space' || ev.code === 'Enter') && !(ev.target as HTMLElement | null)?.closest?.('button, a')) {
+          ev.preventDefault();
+          this.begin();
+        }
+        return;
+      }
+      if (gate !== 'flying') return;
       if (ev.code in KEYS || ev.code.startsWith('Arrow') || ev.code === 'F1') ev.preventDefault();
       if (ev.repeat) return;
       this.keys.add(ev.code);
@@ -471,31 +684,15 @@ export class GullGame {
     window.addEventListener('blur', () => {
       this.keys.clear();
       this.poopHeld = this.mouseScout = false;
+      this.pause();
     });
-  }
-
-  async lockPointer(): Promise<void> {
-    const canvas = this.view?.renderer.domElement;
-    if (!canvas || document.pointerLockElement === canvas) return;
-    try {
-      await canvas.requestPointerLock();
-    } catch {
-      /* the browser refused (e.g. too soon after leaving): a click tries again */
-    }
-  }
-
-  setPaused(paused: boolean): void {
-    if (paused === this.st.paused) return;
-    this.keys.clear();
-    this.poopHeld = this.mouseScout = false;
-    if (paused && document.pointerLockElement) document.exitPointerLock();
-    this.lastFrame = performance.now();
-    this.publish({ paused });
-  }
-
-  resume(): void {
-    this.setPaused(false);
-    void this.lockPointer();
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.pause();
+    });
+    window.addEventListener('beforeunload', (ev) => {
+      // Ask before leaving an operation under way.
+      if (this.st.screen === 'playing' && this.started && !this.mission?.finished && this.st.operation !== 'free') ev.preventDefault();
+    });
   }
 
   cycleCamera(): void {
@@ -539,7 +736,7 @@ export class GullGame {
       const m = KEYS[k];
       if (m) c[m] = true;
     }
-    c.scout = this.mouseScout;
+    c.scout = c.scout || this.mouseScout;
     return c;
   }
 
@@ -551,21 +748,27 @@ export class GullGame {
     const dt = Math.max(0, Math.min(0.1, raw));
     this.lastFrame = now;
     const screen = this.st.screen;
-    if (screen === 'playing' && !this.st.paused && !this.frozen) {
+    const flying = screen === 'playing' && this.st.gate === 'flying';
+    if (flying && !this.frozen) {
       this.accumulator += dt;
       let steps = 0;
       while (this.accumulator >= DT && steps < MAX_STEPS) {
         this.snapPrev();
+        this.missionView?.snapshot();
         this.step(DT);
         this.accumulator -= DT;
         steps++;
       }
       if (steps >= MAX_STEPS) this.accumulator = 0;
+      // The sun and the sky move with the operation's clock.
+      if (now - this.weatherT > 1000) {
+        this.weatherT = now;
+        this.view?.setWeather(this.sceneWeather());
+      }
     } else if (!this.frozen && (screen === 'title' || screen === 'briefing' || screen === 'results')) {
-      this.time += dt;
       this.titleCamera(dt);
     }
-    this.uiTimers(dt);
+    if (flying) this.uiTimers(dt);
     this.renderFrame(dt);
     this.afterDraw(now, raw * 1000);
     this.fpsAcc.n++;
@@ -577,7 +780,7 @@ export class GullGame {
   };
 
   private afterDraw(now: number, frameMs: number): void {
-    if (this.st.paused || this.st.screen !== 'playing') {
+    if (this.st.screen !== 'playing' || this.st.gate !== 'flying') {
       this.dynRes.skipWindow(now);
       return;
     }
@@ -590,7 +793,7 @@ export class GullGame {
 
   private snapPrev(): void {
     const g = this.mission?.gull;
-    if (g) this.prev = { e: g.pos.e, n: g.pos.n, h: g.pos.h, yaw: g.yaw };
+    if (g) this.prev = { e: g.pos.e, n: g.pos.n, h: g.pos.h };
   }
 
   /** One fixed step of the game. */
@@ -669,7 +872,6 @@ export class GullGame {
   }
 
   private uiTimers(dt: number): void {
-    if (this.st.paused) return;
     if (this.radioTimer > 0) {
       this.radioTimer -= dt;
       if (this.radioTimer <= 0) this.nextRadio();
@@ -697,13 +899,12 @@ export class GullGame {
     const g = this.mission!.gull;
     const p = this.prev;
     const lerp = (a: number, b: number) => a + (b - a) * alpha;
-    let dy = g.yaw - p.yaw;
-    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     return {
       e: lerp(p.e, g.pos.e),
       n: lerp(p.n, g.pos.n),
       h: lerp(p.h, g.pos.h),
-      yaw: p.yaw + dy * alpha,
+      // The view turns with the latest mouse movement, not a step behind it.
+      yaw: g.yaw,
       pitch: g.pitch,
       speed: g.speed(),
       yawRate: g.yawRate,
@@ -723,20 +924,22 @@ export class GullGame {
     const env = this.conditions?.env;
     const t = this.time;
     const wl = world.waterLevel;
+    const playing = this.st.screen === 'playing';
     let pose: GullPose | undefined;
-    this.model.root.visible = !!m && this.st.camera !== 'first';
+    const alpha = Math.min(1, this.accumulator / DT);
+    this.model.root.visible = !!m && !(playing && this.st.camera === 'first');
     this.dropRing.visible = false;
     this.dropOnTarget = false;
     if (m) {
       const g = m.gull;
-      pose = this.pose(Math.min(1, this.accumulator / DT));
+      pose = this.pose(alpha);
       const grounded = g.mode === Mode.Ground;
       const floating = g.mode === Mode.Water;
       const at = v.toScene(pose.e, pose.n, grounded ? pose.h - 0.13 : floating ? wl + 0.06 : pose.h);
       const flatSpeed = Math.hypot(g.vel.e, g.vel.n);
       this.model.pose(at, pose.yaw, g.mode === Mode.Air ? Math.atan2(g.flyDir.h, Math.hypot(g.flyDir.e, g.flyDir.n)) : 0, { time: t, airborne: g.isAirborne(), flapPhase: g.flapPhase, flapping: g.flapping, braking: g.braking, diving: g.diving, tumbling: g.mode === Mode.Tumble, walk: grounded ? Math.min(1, flatSpeed / 2.4) : 0, walkPhase: g.walkPhase, floating, yawRate: g.yawRate, speed: g.speed() }, dt);
-      this.missionView?.sync(dt, v.camera);
-      if (this.settings.dropMarker) {
+      this.missionView?.sync(dt, v.camera, alpha, { pos: this.model.billPosition(), yaw: pose.yaw });
+      if (playing && this.settings.dropMarker) {
         const pred = g.predictDrop(world, (a, b) => m.poopTargetOnSegment(a, b)?.pos());
         if (pred) {
           v.toScene(pred.point.e, pred.point.n, pred.point.h + 0.05, this.dropRing.position);
@@ -747,7 +950,7 @@ export class GullGame {
           (this.dropRing.material as THREE.MeshBasicMaterial).color.set(pred.onTarget ? 0xff5040 : 0xffffff);
         }
       }
-      this.audio.setWind(g.isAirborne() ? g.speed() : 0);
+      this.audio.setWind(playing && this.st.gate === 'flying' && g.isAirborne() ? g.speed() : 0);
     }
     const cam = v.camera.position;
     this.audio.listener = { e: cam.x, n: -cam.z, h: cam.y + wl };
@@ -755,7 +958,7 @@ export class GullGame {
     const dart = this.dart;
     const windFromDir = wind ? Math.atan2(-wind.e, -wind.n) : (235 * Math.PI) / 180;
     const windSpeed = wind ? Math.hypot(wind.n, wind.e) : 4.6;
-    v.render(pose, {
+    v.render(playing ? pose : undefined, {
       time: t,
       frameDt: dt,
       waterLevel: wl,
@@ -766,10 +969,43 @@ export class GullGame {
       groundAt: (e, n) => world.cellTop(e, n),
       dart: dart ? { waterLevel: wl, epochMs: this.epochMs(), stream: (n, e) => env?.current(t, n, e) ?? { n: 0, e: 0 }, windFromDir, windSpeed, showLabels: false } : undefined,
     });
+    if (m && playing) this.placeAnchors(m, alpha);
     const now = performance.now();
-    if (m && this.st.screen === 'playing' && now - this.publishT > 100) {
+    if (m && playing && now - this.publishT > 100) {
       this.publishT = now;
       this.publishHud(m);
+    }
+  }
+
+  setAnchor(id: string, el: HTMLElement | null): void {
+    if (el) this.anchors.set(id, el);
+    else this.anchors.delete(id);
+  }
+
+  /** Pin each registered label to its head, every frame (React draws their contents ten times a second). */
+  private placeAnchors(m: Mission, alpha: number): void {
+    if (!this.anchors.size) return;
+    const v = this.view!;
+    const mv = this.missionView;
+    const w = v.renderer.domElement.clientWidth;
+    const h = v.renderer.domElement.clientHeight;
+    const place = (id: string, at: { e: number; n: number; h: number } | undefined) => {
+      const el = this.anchors.get(id);
+      if (!el) return;
+      const s = at ? v.screenOf(at.e, at.n, at.h) : undefined;
+      if (!s || s.behind || Math.abs(s.x) > 1.15 || Math.abs(s.y) > 1.15) {
+        el.style.visibility = 'hidden';
+        return;
+      }
+      el.style.visibility = 'visible';
+      el.style.transform = `translate3d(${((s.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((0.5 - s.y * 0.5) * h).toFixed(1)}px, 0) translate(-50%, -100%)`;
+    };
+    for (const g of m.guards) place(g.id, mv?.headOf(g, alpha, 2.3));
+    for (const n of m.npcs) place(n.id, mv?.headOf(n, alpha, 2.1));
+    for (const mm of m.marchers) place(mm.id, mv?.headOf(mm, alpha, 2.1));
+    if (this.anchors.has('drop')) {
+      const p = this.dropRing.position;
+      place('drop', this.dropRing.visible && this.dropOnTarget ? { e: p.x, n: -p.z, h: p.y + this.world!.waterLevel } : undefined);
     }
   }
 
@@ -778,12 +1014,6 @@ export class GullGame {
     const g = m.gull;
     const world = this.world!;
     const ground = world.surfaceAt(g.pos.e, g.pos.n).h;
-    let drop: HudState['drop'];
-    if (this.dropRing.visible && this.dropOnTarget) {
-      const p = this.dropRing.position;
-      const s = v.screenOf(p.x, -p.z, p.y + world.waterLevel);
-      if (!s.behind) drop = { x: s.x, y: s.y, onTarget: true };
-    }
     let offscreen: number | undefined;
     const target = m.running ? m.currentTarget() : undefined;
     if (target) {
@@ -793,18 +1023,26 @@ export class GullGame {
     const overlays: GuardOverlay[] = [];
     for (const gd of m.guards) {
       const head = gd.headPosition();
-      const s = v.screenOf(head.e, head.n, head.h + 0.55);
       const d = Math.hypot(head.e - g.pos.e, head.n - g.pos.n, head.h - g.pos.h);
-      if (s.behind || Math.abs(s.x) > 1.1 || Math.abs(s.y) > 1.1 || d > 90) continue;
+      if (d > 90) continue;
       const st = gd.state;
       const icon = st === GuardState.Alert ? '!' : st === GuardState.Suspicious || st === GuardState.Investigate || st === GuardState.Search ? '?' : st === GuardState.Distracted ? '…' : '';
-      overlays.push({ id: gd.id, x: s.x, y: s.y, name: gd.tagged ? gd.name : undefined, routine: gd.tagged ? gd.routineText : undefined, state: gd.stateName, suspicion: gd.suspicion / 100, icon, speech: gd.speech?.text, tag: g.scouting && !gd.tagged ? m.tagProgressOf(gd) : undefined });
+      const steps = gd.tagged && gd.routineText ? gd.routineText.split(' · ') : undefined;
+      overlays.push({
+        id: gd.id,
+        name: gd.tagged ? gd.name : undefined,
+        routine: steps,
+        routineStep: steps && (st === GuardState.Routine || st === GuardState.Return) && steps.length === gd.routine.length ? gd.stepIndex() : -1,
+        state: gd.stateName,
+        suspicion: gd.suspicion / 100,
+        icon,
+        speech: gd.speech?.text,
+        tag: g.scouting && !gd.tagged ? m.tagProgressOf(gd) : undefined,
+      });
     }
     for (const n of [...m.npcs, ...m.marchers]) {
       if (!n.speech) continue;
-      const s = v.screenOf(n.pos.e, n.pos.n, n.pos.h + 2.1);
-      if (s.behind || Math.abs(s.x) > 1.1 || Math.abs(s.y) > 1.1) continue;
-      overlays.push({ id: n.id, x: s.x, y: s.y, state: '', suspicion: 0, icon: '', speech: n.speech.text });
+      overlays.push({ id: n.id, state: '', suspicion: 0, icon: '', speech: n.speech.text });
       if (overlays.length > 14) break;
     }
     this.publish({
@@ -815,7 +1053,7 @@ export class GullGame {
         payload: g.payload,
         maxPayload: g.profile.maxPayload,
         heading: ((g.yaw * 180) / Math.PI + 360) % 360,
-        drop,
+        drop: this.dropRing.visible && this.dropOnTarget ? { onTarget: true } : undefined,
         offscreen,
         beak: m.beak?.name,
       },
