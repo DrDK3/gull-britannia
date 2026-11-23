@@ -31,21 +31,21 @@ export const M1 = {
   nest: { e: -330, n: 298 },
   stationRoof: { e: -277, n: 372 },
   churchRoof: { e: -396, n: 346 },
-  customGutter: { e: -322.4, n: 59 },
-  customRidge: { e: -326, n: 60 },
-  coveLamp: { e: -309.2, n: 63.5 },
+  customGutter: { e: -320.6, n: 59 },
+  customChimney: { e: -325, n: 60 },
+  coveLamp: { e: -311.3, n: 63.5 },
   brixham: { e: -297.5, n: 52, yaw: 0.12 },
   fortParapet: { e: -290, n: -8.2 },
-  table: { e: -318.4, n: 58.2 },
+  table: { e: -317.8, n: 58.2 },
   post: { e: -314.2, n: 56.6 },
   barrel: { e: -315.2, n: 54.2 },
-  river: { e: -309.6, n: 66.5 },
+  river: { e: -312.6, n: 66.5 },
   fortEnd: { e: -302.5, n: 31 },
   pump: { e: -319.6, n: 74.5 },
   kitchen: { e: -331.5, n: 77.5 },
   laneFoot: { e: -317.5, n: 71.5 },
-  sill: { e: -312.75, n: 40.2 },
-  bench: { e: -276.4, n: 310 },
+  sill: { e: -312.8, n: 40.2 },
+  bench: { e: -278.8, n: 310 },
   dorothy: { e: -318, n: 392, yaw: 0.05 },
   sentryArea: { eMin: -335, eMax: -299, nMin: 22, nMax: 90 },
 };
@@ -100,7 +100,7 @@ export class Mission1 extends Mission {
     this.stationPerch = this.addPerch('station', v3(M1.stationRoof.e, M1.stationRoof.n, this.top(M1.stationRoof)), 'Station roof', 'Bayard’s Cove lies south along the river. Hold right mouse to scout.');
     this.addPerch('church', v3(M1.churchRoof.e, M1.churchRoof.n, this.top(M1.churchRoof)), 'St Saviour’s roof', 'The old town at a glance.');
     this.gutterPerch = this.addPerch('gutter', v3(M1.customGutter.e, M1.customGutter.n, this.top(M1.customGutter)), 'Custom House gutter', 'Right above the dispatch. A calm sentry never looks this high.');
-    this.addPerch('ridge', v3(M1.customRidge.e, M1.customRidge.n, this.top(M1.customRidge)), 'Custom House roof', 'Watch his routine from here.');
+    this.addPerch('chimney', this.world.highestNear(M1.customChimney.e, M1.customChimney.n, 1), 'Custom House chimney', 'Watch his routine from here.');
     this.addPerch('fort', this.world.highestNear(M1.fortParapet.e, M1.fortParapet.n, 1.5), 'Fort parapet', 'The fort end of his patrol.');
 
     // The quay lamp: a cast-iron post with a lantern, on the quay's edge.
@@ -157,10 +157,10 @@ export class Mission1 extends Mission {
     for (let i = 0; i < 4; i++) this.chips.push(this.addItem('chip', v3(bench.e - 0.05 + (i % 2) * 0.12, bench.n - 0.5 + Math.floor(i / 2) * 0.14, bh + 0.51), this.rng.next() * 2 * PI, 'the clerk’s chips'));
     const sill = M1.sill;
     const sh = this.g(sill) + 1.02;
-    this.addProp({ id: 'sill', kind: 'sill', pos: v3(sill.e, sill.n, sh), yaw: EAST, solids: [{ solid: this.box(sill.e, sill.n, 0, 0.2, 0.55, sh - 0.08, sh), dh0: -0.08, dh1: 0 }] });
+    this.addProp({ id: 'sill', kind: 'sill', pos: v3(sill.e, sill.n, sh), yaw: EAST, solids: [{ solid: this.box(sill.e, sill.n, 0, 0.25, 0.55, sh - 0.08, sh), dh0: -0.08, dh1: 0 }] });
     this.pasty = this.addItem('pasty', v3(sill.e, sill.n, sh), 0.4, 'the bakery windowsill');
     this.addItem('crust', v3(-289.5, 250, this.g({ e: -289.5, n: 250 }) + 0.02), 0.2);
-    this.addItem('crust', v3(-306, 102, this.g({ e: -306, n: 102 }) + 0.02), 1.0);
+    this.addItem('crust', v3(-305.5, 36, this.g({ e: -305.5, n: 36 }) + 0.02), 1.0);
     this.addItem('fishhead', v3(-281.5, 331, this.g({ e: -281.5, n: 331 }) + 0.02), 0.5);
 
     // The courier's table outside the Custom House, the dispatch on it.

@@ -74,7 +74,7 @@ describe('Mission 1 on Bayard’s Cove', () => {
     m.skipTutorial();
     const s = m.sentry;
     const seen = new Set<number>();
-    m.gull.spawn(v3(M1.customRidge.e, M1.customRidge.n, 14.8), Math.PI / 2);
+    m.gull.spawn(v3(M1.customChimney.e, M1.customChimney.n, 14.8), Math.PI / 2);
     run(m, 40, {}, () => {
       seen.add(s.stepIndex());
       return false;

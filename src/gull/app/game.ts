@@ -24,6 +24,7 @@ import { World } from '../game/world';
 import { data1967 } from '../view/era1967';
 import { GullModel } from '../view/gullModel';
 import { CAMERA_LABEL, GULL_CAMERAS, GullScene, type GullCamera, type GullPose } from '../view/gullScene';
+import { gridToInt16, loadCollision } from '../view/collisionData';
 import { captureHeights, type CaptureArea } from '../view/heightCapture';
 import { MissionView } from '../view/missionView';
 import { GameAudio } from './audio';
@@ -110,6 +111,9 @@ export interface GameState {
   /** SailSim's graphics preset ('custom' when changed by hand there). */
   graphics: string;
 }
+
+/** Let the page paint (a progress message) before a long synchronous step. */
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 const KEYS: Record<string, keyof GullControls> = {
   KeyW: 'forward',
@@ -205,8 +209,46 @@ export class GullGame {
 
   // ------------------------------------------------------------------ start-up
 
+  /**
+   * Switches in the page's address: `?debug` shows the frame rate and camera readout; `?survey` reads the town's solid
+   * shape from the picture on this machine instead of loading the baked one; `?bake` does that at full scenery detail
+   * for tools/bake-collision.ts.
+   */
+  readonly flags = (() => {
+    const q = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
+    return { debug: q.has('debug'), survey: q.has('survey') || q.has('bake'), bake: q.has('bake') };
+  })();
+  /** How the solid town was obtained this visit. */
+  collisionSource: 'baked' | 'surveyed' = 'baked';
+
   async attach(container: HTMLElement): Promise<void> {
-    const dataP = loadDartData(`${import.meta.env.BASE_URL}geo/`);
+    try {
+      await this.boot(container);
+    } catch (e) {
+      console.error(e);
+      this.publish({ screen: 'error', error: `Something went wrong while loading: ${(e as Error).message ?? e}` });
+    }
+  }
+
+  /** The grids as the bake stores them (Int16 centimetres), base64 (tools/bake-collision.ts). */
+  exportCollision(): { e0: number; n0: number; cell: number; nx: number; ny: number; b64: string }[] {
+    return (this.world?.grids ?? []).map((g) => {
+      const bytes = new Uint8Array(gridToInt16(g).buffer);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return { e0: g.e0, n0: g.n0, cell: g.cell, nx: g.nx, ny: g.ny, b64: btoa(bin) };
+    });
+  }
+
+  private async boot(container: HTMLElement): Promise<void> {
+    const base = `${import.meta.env.BASE_URL}geo/`;
+    const dataP = loadDartData(base);
+    const bakedP = this.flags.survey
+      ? Promise.resolve(undefined)
+      : loadCollision(base).catch((e: unknown) => {
+          console.warn('Baked collision not used, surveying instead:', e);
+          return undefined;
+        });
     let view: GullScene;
     try {
       view = new GullScene(container);
@@ -230,11 +272,20 @@ export class GullGame {
       this.publish({ screen: 'error', error: 'The River Dart data could not be loaded.', issues });
       return;
     }
+    performance.mark('gb:data');
     this.conditions = buildConditions(CONDITIONS, data.geo);
-    const dart = new DartScene({ manifest: data.manifest, geo: data.geo, features: data.features, drape: data.drape, town: data.town, waterMask: data.waterMask, roads: data.roads, quays: data.quays, detail: view.quality, era: '1967' });
+    this.publish({ progress: 'Raising the town…', issues });
+    await nextFrame();
+    const dart = new DartScene({ manifest: data.manifest, geo: data.geo, features: data.features, drape: data.drape, town: data.town, waterMask: data.waterMask, roads: data.roads, quays: data.quays, detail: this.flags.bake ? 'high' : view.quality, era: '1967' });
     this.dart = dart;
-    this.publish({ progress: 'Surveying the rooftops…', issues });
-    const grids = await captureHeights(view.renderer, dart, CAPTURE_AREAS, (d, n) => this.publish({ progress: `Surveying the rooftops… ${Math.round((100 * d) / n)}%` }));
+    performance.mark('gb:scene');
+    let grids = await bakedP;
+    this.collisionSource = grids ? 'baked' : 'surveyed';
+    if (!grids) {
+      this.publish({ progress: 'Surveying the rooftops…' });
+      grids = await captureHeights(view.renderer, dart, CAPTURE_AREAS, (d, n) => this.publish({ progress: `Surveying the rooftops… ${Math.round((100 * d) / n)}%` }));
+    }
+    performance.mark('gb:collision');
     view.setDart(dart);
     // People and props stand on what is drawn (quay tops and pavements sit up to a metre above SailSim's terrain),
     // but not on roofs or treetops overhead.
@@ -249,10 +300,12 @@ export class GullGame {
     this.titleCamera(0);
     this.renderFrame(0);
     await view.warmUp().catch(() => undefined);
+    performance.mark('gb:shaders');
     this.lastFrame = performance.now();
     this.raf = requestAnimationFrame(this.frame);
     this.audio.music('title');
     this.publish({ screen: 'title', progress: '' });
+    performance.mark('gb:title');
   }
 
   waterLevel(): number {

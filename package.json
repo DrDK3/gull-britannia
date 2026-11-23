@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "node tests/e2e/run.cjs"
+    "e2e": "node tests/e2e/run.cjs",
+    "bake:collision": "tsx tools/bake-collision.ts"
   },
   "dependencies": {
     "react": "19.2.9",

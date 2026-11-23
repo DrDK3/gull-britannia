@@ -24,7 +24,8 @@ export interface CaptureArea {
 }
 
 /** Objects that move, or are not solid, by name (src/render/population.ts and friends). */
-const SKIP = new Set(['cars', 'walkers', 'people-on-quays', 'people-on-pontoons', 'woodland']);
+// Parked cars are left out too: how many are drawn depends on the scenery detail, and the baked world must suit all.
+const SKIP = new Set(['cars', 'parked-cars', 'walkers', 'people-on-quays', 'people-on-pontoons', 'woodland']);
 
 const OFFSET = 100;
 const SCALE = 1000;

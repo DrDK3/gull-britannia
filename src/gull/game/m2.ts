@@ -32,14 +32,14 @@ export const BOMBER_PROFILE: Partial<GullProfile> = {
 
 /** The stand on the promenade, facing west across the Embankment road. */
 export const M2 = {
-  stand: { e: -278.6, n: 306, w: 4, l: 12, deck: 1.6 },
-  lectern: { e: -280.05, n: 306 },
-  voronova: { e: -279.25, n: 305.1 },
-  grushkov: { e: -278.2, n: 308.2 },
-  general: { e: -278.2, n: 303.6 },
-  refreshments: { e: -277.4, n: 301.2 },
-  kulik: { e: -279.6, n: 318.5 },
-  osipov: { e: -279.6, n: 293.5 },
+  stand: { e: -280.3, n: 306, w: 4, l: 12, deck: 1.6 },
+  lectern: { e: -281.75, n: 306 },
+  voronova: { e: -280.95, n: 305.1 },
+  grushkov: { e: -279.9, n: 308.2 },
+  general: { e: -279.9, n: 303.6 },
+  refreshments: { e: -279.1, n: 301.2 },
+  kulik: { e: -283.4, n: 318.5 },
+  osipov: { e: -283.4, n: 293.5 },
   /** The parade marches up and down the Embankment road. */
   paradeE: -289.2,
   routeSouth: 262,
@@ -47,7 +47,7 @@ export const M2 = {
   zoneSouth: 288,
   zoneNorth: 322,
   speed: 1.3,
-  chaosArea: { eMin: -296, eMax: -281.5, nMin: 258, nMax: 354 },
+  chaosArea: { eMin: -296, eMax: -283.6, nMin: 258, nMax: 354 },
   roost: { e: -372, n: 390 },
   spawn: { e: -396, n: 346 },
   stationRoof: { e: -277, n: 372 },
@@ -158,7 +158,7 @@ export class Mission2 extends Mission {
     this.restricted.push({ e: M2.lectern.e, n: M2.lectern.n, h: deck, radius: 4.5, height: 4 });
     this.addItem('bun', v3(M2.refreshments.e - 0.1, M2.refreshments.n - 0.3, deck + 0.86), 0, 'the refreshment table');
     this.addItem('bun', v3(M2.refreshments.e + 0.15, M2.refreshments.n + 0.2, deck + 0.86), 0, 'the refreshment table');
-    this.addItem('crust', v3(-300, 352, W.groundAt(-300, 352) + 0.02), 0.3);
+    this.addItem('crust', v3(-281.5, 331, W.groundAt(-281.5, 331) + 0.02), 0.3);
 
     // Officers on the stand.
     this.grushkov = { id: 'grushkov', style: 'officer', pos: v3(M2.grushkov.e, M2.grushkov.n, deck), yaw: WEST, anim: 'attention', headYaw: 0, headPitch: 0, phase: 0, moving: false };

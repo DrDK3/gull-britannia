@@ -84,7 +84,7 @@ function suite() {
   check('m1: flies to the Custom House', flyTo({ e: gp.e + 6, n: gp.n, h: gp.h + 6 }, 8, 90));
   m.gull.spawn({ e: gp.e, n: gp.n, h: gp.h + 0.35 }, Math.PI / 2, -0.4);
   const s = m.sentry;
-  check('m1: the sentry walks his routine to the river wall', until(60, () => s.stepIndex() === 2 && !s.moving && Math.hypot(s.pos.e + 309.6, s.pos.n - 66.5) < 0.4));
+  check('m1: the sentry walks his routine to the river wall', until(60, () => s.stepIndex() === 2 && !s.moving && Math.hypot(s.pos.e - s.routine[2].e, s.pos.n - s.routine[2].n) < 0.4));
   check('m1: he never noticed the gull on the gutter', m.stats.spotted === 0 && s.state === 0, s.stateName);
   m.gull.spawn({ e: m.dispatch.pos.e + 0.9, n: m.dispatch.pos.n, h: m.dispatch.pos.h - 0.4 }, -Math.PI / 2);
   step(20);

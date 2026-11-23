@@ -125,11 +125,12 @@ export class World {
   private readonly ground?: (e: number, n: number) => number;
 
   constructor(o: { grids: Grid[]; waterLevel: number; beyond?: (e: number, n: number) => number; ground?: (e: number, n: number) => number; bounds?: World['bounds'] }) {
-    this.grids = o.grids;
+    // Finest first: cellTop and cellBox take the first grid that covers a point.
+    this.grids = [...o.grids].sort((a, b) => a.cell - b.cell);
     this.waterLevel = o.waterLevel;
     this.beyond = o.beyond ?? (() => -50);
     this.ground = o.ground;
-    const g = o.grids[o.grids.length - 1];
+    const g = this.grids[this.grids.length - 1];
     this.bounds = o.bounds ?? (g ? { eMin: g.e0, eMax: g.e0 + g.nx * g.cell, nMin: g.n0, nMax: g.n0 + g.ny * g.cell } : { eMin: -1e4, eMax: 1e4, nMin: -1e4, nMax: 1e4 });
   }
 

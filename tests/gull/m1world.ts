@@ -16,7 +16,7 @@ export function m1World(): World {
   const h = new Float32Array(nx * ny);
   const blocks: [number, number, number, number, number][] = [
     // e0, e1, n0, n1, top
-    [-332, -321, 52, 67, 13], // Custom House
+    [-332, -320.5, 52, 67, 13], // Custom House
     [-328, -324, 55, 65, 14.5], // its ridge
     [-320, -313, 34, 46, 15], // the bakery
     [-345, -300, 292, 302, 16.3], // the nest's flat roof
