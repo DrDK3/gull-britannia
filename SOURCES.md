@@ -2,7 +2,7 @@
 
 *Gull Britannia* is set in an alternate 1967 in which Soviet forces occupy southern England. The occupation, its people and its paperwork are fiction. The town underneath it is real: since version 2 the game is built on [SailSim](https://drdk3.github.io/SailSim/)'s River Dart, made from open survey data (terrain, buildings, roads, quays, the river), and taken back to 1967. This file records what was checked, where it came from, what was changed for 1967, and what is approximated or invented.
 
-Historical research was done on 11 November 2026 with web search. Items marked **verified** were confirmed against at least one of the sources listed at the bottom. Items marked **unverified** are general knowledge that was not re-checked and should be confirmed before they are relied on.
+Historical research was done on 11 November 2026 with web search, and extended on 21–22 November 2026 into a full report with a verification pass against the cited pages: [`reports/Dartmouth and the Dart in 1967.md`](reports/Dartmouth%20and%20the%20Dart%20in%201967.md). Where the two disagree, the report is right. Items marked **verified** were confirmed against at least one of the sources listed at the bottom. Items marked **unverified** are general knowledge that was not re-checked and should be confirmed before they are relied on. What is known to be wrong for 1967 and not yet fixed is listed in [`reports/backlog.md`](reports/backlog.md).
 
 ## The map: SailSim's River Dart
 
@@ -16,21 +16,30 @@ The gull collides with what is drawn. When the game loads, it renders the scener
 
 | Removed | Why |
 | --- | --- |
-| The marinas (Darthaven, Dart Marina, Noss on Dart) and their berths; the visitor and service pontoons in the river (Deep Water Pontoons, the K and D pontoons, Hoodown, the yacht-club pontoons) | The marinas date from the 1970s onwards. **Unverified**: exact opening years. |
+| Darthaven Marina and Noss on Dart Marina and their berths; the visitor and service pontoons in the river (Deep Water Pontoons, the K and D pontoons, Hoodown, Double Steps, the yacht-club pontoons) | Darthaven dates from about 1975 (**unverified**: the exact year) and the present Noss marina from 2023. **Dart Marina at Sandquay is kept**: Philip & Son's yard there became a marina in 1965 and its hotel opened in June 1961 (verified: Devon Historic Coastal and Market Towns Survey; Dart Marina's own history). Today's is larger: its 110 berths date from 1994–97. |
 | Supermarkets, the filling station, the leisure centre, the health centre and the park-and-ride at Townstal | Modern out-of-town development. |
 | Apartment blocks on the North Embankment (Clarence House, Dartside Court, Kings Quay House, Lee Court, Mayflower Court, Sails, Vavasour House) and Marina View Apartments in Kingswear | Late-20th-century redevelopment. **Unverified**: individual dates. |
 | The Flavel arts centre; the toilet block and pumping station by Coronation Park; the community greenhouse | Modern. |
 | The Dart lifeboat station | The Dart RNLI station opened in 2007. **Unverified.** |
+| The tourist office and the Marks & Spencer block off Mayor's Avenue | Built in 1993 and 1995–96. The Marks & Spencer site was Western National's bus park in 1967 (verified: Dartmouth History Research Group, *Shops & Businesses North*). |
+| The harbour authority's depot at Hoodown | The authority dates from 1975–76, so its depot cannot be older (**unverified**: the building's own date). |
+| The training ship *Hindostan* off Sandquay | The former HMS *Cromer*, commissioned in 1992 and renamed in 2001 (verified: Wikipedia, *HMS Cromer (M103)*). |
+| The steam train at Kingswear | SailSim draws the heritage Dartmouth Steam Railway, which began in 1973. In 1967 the branch was British Railways (Western Region), worked by three-car Class 116 diesel units in plain green (verified: railcar.co.uk). The track and station stay; no train runs until a period one is modelled. |
 | The superyacht on the ship buoys, and the marina's lettering on the Noss hall | Modern. |
 | The Noss on Dart ferry | It serves the marina. |
 | Most of the yachts on the trots (58% removed, and 83% of the motor cruisers) | Far fewer, smaller boats in 1967. |
 
-Kept and believed to suit 1967 (verified below unless marked): the Higher Ferry (floating bridge), the Lower Ferry (tugs and floats), the passenger ferry and its Kingswear landing, the Boat Float, the Embankment, Bayard's Cove and its fort, the Royal Castle Hotel, St Saviour's, the Dartmouth "station", the railway at Kingswear, the river boats' landing stage.
+Kept and believed to suit 1967 (verified below unless marked): the Higher Ferry (floating bridge), the Lower Ferry (tugs and floats), the passenger ferry, the Boat Float, the Embankment, Bayard's Cove and its fort, the Royal Castle Hotel, St Saviour's, the Dartmouth "station", the railway track and station at Kingswear, Dart Marina at Sandquay.
+
+Kept although not of 1967, until its replacement is built: the river boats' pontoon off the North Embankment (in 1967 they lay against the quay wall beside the station's own covered pontoon).
 
 **Remaining approximations in the scenery:**
 
 - **Cars and boats are SailSim's modern shapes.** The cars are fewer (about half) and painted in a 1960s British palette; their shapes are not period. The moored yachts' hulls are modern designs.
-- **The trains at Kingswear** are SailSim's. In 1967 the Kingswear line was British Railways; steam had given way to diesel by the mid-1960s. **Unverified**: what SailSim's trains depict versus a 1967 BR diesel multiple unit.
+- **Everything that moves on the river is still present-day**: the Higher Ferry is the 2009 cable ferry (in 1967 a paddle-driven floating bridge), the passenger ferry and the river boat are modern launches (the river boats were white-hulled then), and three idle paddle steamers are missing.
+- **The Embankment** is today's: in 1967 it was up to 6 m narrower, and the station had a roofed pontoon reached by a steel bridge.
+- **College Way** (opened 1969) is still on the hillside: there is no way yet to remove a road.
+- **The Dartmouth Clinic** (1990) stands where the cinema stood in 1967, and is left as a stand-in for it.
 - **Unnamed modern buildings** (later houses and estates) are not removed: OpenStreetMap does not date them.
 - **Street furniture, signs and the people walking about** are SailSim's present-day figures.
 
@@ -49,7 +58,7 @@ Kept and believed to suit 1967 (verified below unless marked): the Higher Ferry 
 
 **Conflicts noted:** the Embankment is dated 1885 by the walking trails and c.1889 by the listing. One listing says Bayard's Cove quay only reached the fort in 1839; English Heritage dates the quay to the early 16th century. The game shows the quay as it stood by 1967, so neither date matters.
 
-**Time, tide and light.** Mission 1 is set at 13.20 BST on 3 June 1967. The sun's position is computed for that date and place (SailSim's solar model). The tide is a manual curve (high water 13.05, 4.7 m above chart datum), illustrative rather than the real 1967 tide.
+**Time, tide and light.** Each operation has its own day (`MissionConditions` in `src/gull/game/`). Mission 1 is 13.20 BST on Saturday 3 June 1967; Mission 2 is 10.55 BST on Wednesday 7 June 1967. The sun's position is computed for the date and place (SailSim's solar model). The moon was in its last quarter about 30 May and new on 8 June, so 3 June was near neaps: Mission 1's tide is a neap curve (high water about 14.35 BST, 4.0 m above chart datum; low water 1.9 m). **Unverified**: the real times and heights, which need a 1967 tide table. Mission 2's water level is illustrative: on a spring tide the real river was probably near low water at that hour and the Boat Float nearly dry (`reports/backlog.md`).
 
 ## Unverified: check before relying on these
 

@@ -431,15 +431,21 @@ export class GullScene {
       // Over the shoulder while scouting: a little to the right.
       if (scout) target.add(new THREE.Vector3(Math.cos(g.yaw), 0, Math.sin(g.yaw)).multiplyScalar(0.35));
       const desired = target.clone().addScaledVector(look, -distance).add(new THREE.Vector3(0, 0.45 + distance * 0.1, 0));
-      // Keep the camera out of roofs and hills: pull in along the line to the gull.
+      // Keep the camera out of roofs and hills.
       if (env.groundAt) {
+        const surface = (p: THREE.Vector3) => env.groundAt!(p.x, -p.z) - this.waterLevel;
+        // A roof slope or a bank rising behind the gull (perched on a gutter, say): ride up over it, keeping the
+        // distance. Pulling in instead would put the camera inside the gull.
+        const lift = surface(desired) + 0.5 - desired.y;
+        if (lift > 0 && lift <= 2.5) desired.y += lift;
+        // Something taller in the way (a wall, a chimney): come in along the line to just short of it, but never
+        // closer than a quarter of the distance, and stay above whatever is underneath there.
         const steps = 12;
         for (let i = 1; i <= steps; i++) {
           const p = target.clone().lerp(desired, i / steps);
-          const ground = env.groundAt(p.x, -p.z) - this.waterLevel;
-          if (p.y < ground + 0.35) {
-            desired.copy(target.clone().lerp(desired, Math.max(0.05, (i - 1) / steps)));
-            desired.y = Math.max(desired.y, ground + 0.4);
+          if (p.y < surface(p) + 0.2) {
+            desired.copy(target.clone().lerp(desired, Math.max(0.25, (i - 1) / steps)));
+            desired.y = Math.max(desired.y, Math.min(surface(desired) + 0.4, target.y + 2.5));
             break;
           }
         }

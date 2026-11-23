@@ -926,7 +926,9 @@ export class GullGame {
     const wl = world.waterLevel;
     const playing = this.st.screen === 'playing';
     let pose: GullPose | undefined;
-    const alpha = Math.min(1, this.accumulator / DT);
+    // Between the last two steps, by how far the frame clock is into the next one. When something else is stepping the
+    // game (tests and screenshot scripts set `frozen`), draw the latest state as it is.
+    const alpha = this.frozen ? 1 : Math.min(1, this.accumulator / DT);
     this.model.root.visible = !!m && !(playing && this.st.camera === 'first');
     this.dropRing.visible = false;
     this.dropOnTarget = false;

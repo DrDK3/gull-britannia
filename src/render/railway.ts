@@ -308,7 +308,8 @@ export class RailwayView {
   private lastTime?: number;
 
   /** `detail` 'low' (a software renderer): sleepers only within 300 m of the station, where trains are seen up close. */
-  constructor(features: RailwayFeatures, ground: Ground, detail: 'high' | 'low' = 'high') {
+  // Gull Britannia: `trains` false leaves the track and stations without the train (the steam railway dates from 1973).
+  constructor(features: RailwayFeatures, ground: Ground, detail: 'high' | 'low' = 'high', trains = true) {
     this.group.name = 'railway';
     this.railway = new Railway(features);
     const sleepers: THREE.Matrix4[] = [];
@@ -345,7 +346,7 @@ export class RailwayView {
       this.group.add(im);
     }
     for (const st of features.stations) this.buildStation(st, ground);
-    if (r.main && r.station) {
+    if (trains && r.main && r.station) {
       this.loco = locoModel();
       this.group.add(this.loco);
       const c = coachModel();

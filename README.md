@@ -17,7 +17,9 @@ The scenery, sky, water, light and rendering are built on [SailSim](https://drdk
 
 **https://drdk3.github.io/gull-britannia/**
 
-A desktop browser with a mouse is best (Chrome, Edge, Firefox or Safari, with WebGL 2). The first load fetches about 3 MB of River Dart data, then spends a few seconds "surveying the rooftops": it measures every roof the gull can land on. Click the view to capture the mouse; Esc releases it and pauses.
+A desktop browser with a mouse is best (Chrome, Edge, Firefox or Safari, with WebGL 2). The first load fetches about 4 MB of River Dart data and takes a few seconds to lay the town out.
+
+Each operation opens on the scene with a **Click to fly** card. Nothing moves and the clock does not start until you take control: click to capture the mouse, or choose **Keyboard only** and look with the arrow keys. Esc pauses and releases the mouse; Resume captures it again; Esc from the pause menu steps back to the Click to fly card.
 
 Graphics follow SailSim's presets (Smooth, Balanced, Ultra are picked for your graphics card), and dynamic resolution keeps the frame rate up on slower machines.
 
@@ -35,7 +37,8 @@ Graphics follow SailSim's presets (Smooth, Balanced, Ultra are picked for your g
 | E | Snatch / set down / deliver |
 | F | Eat what's in your beak (you can eat in flight) |
 | Q or left mouse | Poop. It keeps your momentum, so height, speed and timing decide where it lands. A ring shows the predicted impact; it turns red and reads **ON TARGET** when the drop will hit a head, a mug or a soldier. |
-| Right mouse (hold) | Scout: zoom in, and hold the view on a guard to tag him. Tagged guards show their name, routine, suspicion and vision cone. |
+| T or right mouse (hold) | Scout: zoom in, and hold the view on a guard to tag him. Tagged guards show their name, their routine with the current step marked, suspicion and vision cone. |
+| Q, with the Wing | In Mission 2 the Bomber Wing lays a box of drops around your mark: one rank short of it, level with it and two ranks beyond, on each side of your track. The marker leads a marching column, so **ON TARGET** means what it says. |
 | G | Signal the flock (Mission 2, from the roost) |
 
 | On foot, perched or afloat | |
@@ -121,12 +124,15 @@ npm run preview
 npm test
 ```
 
-Vitest runs the game logic headless (no browser): 25 tests in `tests/gull/`.
+Vitest runs the game logic headless (no browser): 38 tests in `tests/gull/`.
 
 | File | What it checks |
 | --- | --- |
 | `flight.test.ts` | Take-off and climb, flap, glide and dive, stall recovery, brake and hover, landing assist onto a quay and a pitched roof, walking up a roof, wall tumble and recovery, landing on and taking off from water, perching, poop momentum and the drop prediction. |
 | `m1.test.ts` | Mission 1 on a stand-in of Bayard's Cove: the flying lesson flown by an autopilot (take off, fly to the station, land); the sentry's routine; the unseen route through delivery, lunch and the review (stealth 300, clean escape 200); the tea and tunic distractions; being spotted, the search and the return; theft discovery and papers put back; carrying papers in view; restart. |
+| `world.test.ts` | Collision with two overlapping height grids: the finer one decides, whichever order they are given in. |
+| `m2pilot.test.ts` | Mission 2's strike flown by a pilot with the player's inputs only (`pilot.ts`: rate-limited mouse look, the control keys, Q and G; no teleports). It scouts from the church roof, lands on the hotel roof, signals, and breaks the formation by releasing on ON TARGET, flying with the march and against it, higher, lower and along an outer file. Without the Wing the same drops do not break it. The wingmen stay within 0.3 m of their slots at cruising speed. |
+| `era1967.test.ts` | The 1967 removal list against the real map data: one Spar of three removed, no modern pontoons kept but the river boats', Dart Marina's fixed piers kept. |
 | `m2.test.ts` | Mission 2: the parade's march and turn; tagging Voronova; signalling only from the roost; the flock's box and its drops; a strike in front of the stand breaking the formation, Voronova leaving the lectern, the theft and delivery, and the review; a strike away from the stand; Voronova catching a gull at the lectern. |
 
 ```bash
@@ -135,25 +141,53 @@ npm run typecheck
 
 This checks the browser code and, separately, that the game logic in `src/gull/game` stays DOM-free.
 
+```bash
+npm run lint
+```
+
+GitHub Actions runs the type check, the lint, the unit tests, the build and the end-to-end suites on every push, and deploys `main` to GitHub Pages (`.github/workflows/ci.yml`).
+
 ### End to end, in a browser
 
-The unit tests use a simplified stand-in for the town. The end-to-end check loads the real game in headless Chromium (software WebGL works), and an autopilot flies both missions over the real, captured Dartmouth, steering the view and pressing the same controls a player does:
+The unit tests use a simplified stand-in for the town. The end-to-end suites load the real game in headless Chromium (software WebGL works):
 
 ```bash
 npm run build
 ```
 
 ```bash
-npm run preview
+npm run e2e
 ```
 
-Then, in another terminal:
+`npm run e2e` serves `dist/` itself and runs every suite in `tests/e2e/`. Add `-- --only gate` to run one, or `-- http://127.0.0.1:4173/` to use a server that is already running.
+
+**`gate.e2e.cjs`** (28 checks) drives the real buttons and keys: at the Click to fly card the mission, the clock and the tide stand still; a click captures the mouse and starts the mission; Esc pauses and lets the mouse go; Resume captures it again; Esc from the pause menu steps back to the card; Keyboard only starts at once; T scouts; Space takes off; Restart puts the clock and the tide back to 13.20; each operation has its own day; the fps readout appears only with `?debug`.
+
+**`missions.e2e.cjs`** (40 checks): an autopilot flies both missions over the real Dartmouth, steering the view and pressing the same controls a player does. They cover: the roofs, quays and water are where the picture draws them; Mission 1 flown from the nest to the station roof, waiting unseen on the Custom House gutter for the sentry's back, the snatch, the flight to the Boat Float, the delivery, a chip and the review (grade A, full stealth and clean-escape bonuses); the tea distraction on the real lane; Mission 2 from tagging Voronova to the strike, the theft, the delivery and the review; restart; back to the title. It needs Playwright's Chromium (or set `CHROMIUM_PATH`).
+
+### The collision bake
+
+The gull collides with what is drawn. The scenery is rendered from straight above into two height grids (0.5 m cells over the old town, 2 m over the harbour), which are baked at build time and shipped as `public/geo/collision-*.i16z` (about 1 MB together). After changing anything that stands still in the scene (buildings, quays, trees, the 1967 removal list), bake again:
 
 ```bash
-npm run e2e -- http://127.0.0.1:4173/
+npm run build
 ```
 
-40 checks, all passing. They cover: the roofs, quays and water are where the picture draws them; Mission 1 flown from the nest to the station roof, waiting unseen on the Custom House gutter for the sentry's back, the snatch, the flight to the Boat Float, the delivery, a chip and the review (grade A, full stealth and clean-escape bonuses); the tea distraction on the real lane; Mission 2 from tagging Voronova to the strike, the theft, the delivery and the review; restart; back to the title. It needs Playwright's Chromium (or set `CHROMIUM_PATH`).
+```bash
+npm run bake:collision
+```
+
+```bash
+npm run build
+```
+
+Opening the game with `?survey` measures the roofs in the browser instead, as it did before the bake (about 2 s slower to load). `?debug` shows the frame rate and camera readout.
+
+To time a load (to the title screen, in headless Chromium):
+
+```bash
+node tools/measure-load.cjs http://127.0.0.1:4173/ 3
+```
 
 ## Project layout
 
@@ -161,14 +195,16 @@ npm run e2e -- http://127.0.0.1:4173/
 | --- | --- |
 | `src/main.tsx` | Entry point |
 | `src/gull/game/` | Game logic, DOM-free and deterministic: the world and collision (`world.ts`), the gull's flight (`gull.ts`), guards (`guard.ts`), items, missions (`mission.ts`, `m1.ts`, `m2.ts`, `free.ts`), the parade and the flock (`parade.ts`) |
-| `src/gull/view/` | Drawing: the scene and cameras (`gullScene.ts`, after SailSim's `SceneView`), the roof survey (`heightCapture.ts`), 1967 (`era1967.ts`), the gull, people and props |
+| `src/gull/view/` | Drawing: the scene and cameras (`gullScene.ts`, after SailSim's `SceneView`), the roof survey and its baked form (`heightCapture.ts`, `collisionData.ts`), 1967 (`era1967.ts`), the gull, people and props |
+| `tools/` | `bake-collision.ts` (the collision bake), `measure-load.cjs` (load timing) |
+| `reports/` | The 1967 research report, the foundation plan, and `backlog.md`: what is known to be wrong and not yet fixed |
 | `src/gull/app/` | The controller (`game.ts`), sound and music (`audio.ts`), briefings, settings and progress |
 | `src/gull/ui/` | The React screens and HUD |
 | `src/render`, `src/sim`, `src/app`, `public/geo` | SailSim's River Dart: scenery, sky, water, weather, tides and data, vendored (see `VENDORED.md`) |
-| `tests/gull/` | The tests |
+| `tests/gull/`, `tests/e2e/` | The unit tests and the browser suites |
 | `SOURCES.md` | Research notes, what was changed for 1967, and data attributions |
 
-The first version of the game (Godot 4, a hand-built and compressed Dartmouth) is kept in this repository's history under the tag `godot-v1`.
+The first version of the game (Godot 4, a hand-built and compressed Dartmouth) is kept in this repository as the branch `godot-v1-archive`.
 
 ## Credits and licences
 

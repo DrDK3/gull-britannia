@@ -2,16 +2,21 @@
  * SailSim's River Dart as it is today, taken back to June 1967 (Gull Britannia's alternative 1967). The land, the
  * town, the quays and the river are the same; what came later is taken out:
  *
- * - The marinas (Darthaven, Dart Marina, Noss on Dart) and their berths, and the visitor and service pontoons out in
- *   the river. Fixed jetties, steps and slips stay, as do the landing stages for the ferries and the river boats.
- * - Buildings put up after 1967 that stand out from the river: the supermarkets, filling station, leisure centre and
- *   park-and-ride out at Townstal; the apartment blocks on the North Embankment and at Kingswear; the arts centre; the
- *   lifeboat station (the Dart station opened in 2007); the toilet block and pumping station by Coronation Park.
+ * - Darthaven Marina (about 1975) and Noss on Dart Marina (2023) with their berths, and the visitor and service
+ *   pontoons out in the river. Fixed jetties, steps and slips stay. Dart Marina at Sandquay stays: Philip & Son's yard
+ *   there became a marina in 1965 (smaller than today's; its fixed piers are kept as they are).
+ * - Buildings put up after 1967 that stand out: the supermarkets, filling station, leisure centre and park-and-ride
+ *   out at Townstal; the apartment blocks on the North Embankment and at Kingswear; the arts centre; the lifeboat
+ *   station (2007); the toilet block and pumping station by Coronation Park; the tourist office (1993) and the
+ *   Marks & Spencer block (1995-96, on what was the bus park) off Mayor's Avenue; the harbour authority's depot at
+ *   Hoodown (the authority dates from 1975).
+ * - The college's moored training ship Hindostan (the former HMS Cromer, commissioned in 1992).
  * - The Noss on Dart ferry (it serves the marina).
  * - Most of the yachts on the trots: fewer, smaller boats then. (The models are SailSim's; shapes are modern.)
  *
- * The superyacht on the ship buoys and the marina's lettering are left out in src/render/dart.ts (`era: '1967'`),
- * and the street's cars get a period palette there. Sources and what remains approximate: SOURCES.md.
+ * The superyacht on the ship buoys, the marina's lettering and the heritage steam train are left out in
+ * src/render/dart.ts (`era: '1967'`), and the street's cars get a period palette there. Sources, and what is still
+ * wrong for 1967: reports/Dartmouth and the Dart in 1967.md, SOURCES.md and reports/backlog.md.
  */
 import type { DartData, DartFeatures } from '../../app/geoLoader';
 
@@ -19,7 +24,6 @@ import type { DartData, DartFeatures } from '../../app/geoLoader';
 export const MODERN_BUILDINGS = new Set([
   "Sainsbury's",
   'Lidl',
-  'Spar',
   'BP',
   'Dartmouth Leisure Centre',
   'Dartmouth Park & Ride Toilets',
@@ -37,13 +41,25 @@ export const MODERN_BUILDINGS = new Set([
   'Dartmouth Community Greenhouse',
   'Dart Lifeboat Station',
   'The Flavel',
+  'Dartmouth Tourist Information Centre',
+  'Marks & Spencer',
+  'Hoodown Depot - Dart Harbour and Navigation Authority',
+  // A ship that OpenStreetMap maps as a building (src/render/dart.ts draws her from it).
+  'Hindostan',
 ]);
 
-/** Floating stages that stay: the ferries' and the river boats' landings. */
-const KEEP_FLOATING = new Set(['Riverboat Pontoon', 'Double Steps Pontoon']);
+/**
+ * Removed by name and place together, where the name alone also matches older premises: the filling station's shop at
+ * Townstal is a Spar, and so are two shops in town (a Spar grocer traded in Dartmouth in the 1960s).
+ */
+const MODERN_AT: readonly { name: string; e: number; n: number; r: number }[] = [{ name: 'Spar', e: -1928, n: -32, r: 60 }];
 
-/** Kingswear's passenger ferry landing (unnamed in the data): kept. */
-const KINGSWEAR_FERRY = { e: 202, n: 359, r: 25 };
+/**
+ * Floating stages that stay. The river boats' pontoon is not of 1967 (they lay against the quay wall by the station
+ * pontoon then), but SailSim's river boat still calls there: it goes when the station pontoon is built
+ * (reports/backlog.md).
+ */
+const KEEP_FLOATING = new Set(['Riverboat Pontoon']);
 
 const MODERN_FERRIES = new Set(['Noss on Dart / Dartmouth Ferry']);
 
@@ -66,19 +82,20 @@ function hash01(i: number): number {
 }
 
 export function features1967(f: DartFeatures): DartFeatures {
-  const piers = f.piers.filter((p) => {
-    if (!p.floating) return true;
-    if (p.name && KEEP_FLOATING.has(p.name)) return true;
-    const [e, n] = centre('line' in p ? p.line : p.poly);
-    return Math.hypot(e - KINGSWEAR_FERRY.e, n - KINGSWEAR_FERRY.n) < KINGSWEAR_FERRY.r;
-  });
+  const piers = f.piers.filter((p) => !p.floating || (!!p.name && KEEP_FLOATING.has(p.name)));
+  const modern = (b: DartFeatures['buildings'][number]) => {
+    if (!b.n) return false;
+    if (MODERN_BUILDINGS.has(b.n)) return true;
+    const [e, n] = centre(b.r as [number, number][]);
+    return MODERN_AT.some((m) => m.name === b.n && Math.hypot(e - m.e, n - m.n) < m.r);
+  };
   const moorings = f.moorings.filter((m, i) => {
     const keep = m.k === 'motor' ? MOORINGS_KEPT * 0.4 : MOORINGS_KEPT;
     return hash01(i) < keep;
   });
   return {
     ...f,
-    buildings: f.buildings.filter((b) => !(b.n && MODERN_BUILDINGS.has(b.n))),
+    buildings: f.buildings.filter((b) => !modern(b)),
     piers,
     marinas: [],
     moorings,

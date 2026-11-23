@@ -153,13 +153,30 @@ function suite() {
   check('m2: lands on the roost', until(10, () => m.gull.perch === m.roostPerch, { land: true, back: true }));
   m.signal();
   check('m2: the Wing scrambles', m.allies.every((a) => a.state === 1));
-  m.setParade(316, -1);
-  for (let i = 0; i < 4; i++) {
-    const sd = m.marchers[i];
-    m.spawnPoop({ e: sd.pos.e, n: sd.pos.n, h: sd.pos.h + 4 }, { e: 0, n: 0, h: -1 }, true);
-    step(36);
+  // The strike, flown: round to the south of the column and up its line against the march, 14 m over the road,
+  // releasing when the marker reads ON TARGET. (The parade is put at the top of its beat for the timing; the gull and
+  // the Wing are not placed.)
+  m.setParade(332, -1);
+  m.gull.takeOff(m);
+  const lineE = m.marchers[1].pos.e;
+  const runH = w.groundAt(lineE, 300) + 14;
+  check('m2: flies round to the south end of the Embankment', flyTo({ e: lineE, n: 212, h: runH + 3 }, 10, 60));
+  let released = 0;
+  let slotError = 0;
+  for (let i = 0; i < 40 * 60 && m.brokenCount === 0 && m.gull.pos.n < 360; i++) {
+    const g = m.gull;
+    g.yaw = Math.atan2(lineE - g.pos.e, 25);
+    g.pitch = Math.max(-0.35, Math.min(0.35, (runH - g.pos.h) * 0.08));
+    const pred = m.dropPrediction();
+    const press = !!(pred && pred.onTarget) && m.inZone() && released < 2;
+    if (press && released === 0) for (const a of m.allies) slotError = Math.max(slotError, Math.hypot(a.pos.e - a.slotPosition(g).e, a.pos.n - a.slotPosition(g).n));
+    const before = m.stats.drops;
+    m.step(DT, { ...NO, forward: g.airSpeed < 12, flap: runH - g.pos.h > 1.5 }, press);
+    if (m.stats.drops > before) released++;
   }
-  check('m2: four hits in front of the stand break the formation', m.brokenCount === 1);
+  step(120, { forward: true });
+  check('m2: the Wing is on its slots at the release', released > 0 && slotError < 0.8, `${slotError.toFixed(2)} m`);
+  check('m2: following ON TARGET, the Wing breaks the formation', m.brokenCount === 1, `leader ${m.stats.hits}, Wing ${m.stats.flockHits}`);
   check('m2: Voronova leaves the lectern', until(8, () => m.voronova.isBusy()));
   m.gull.spawn({ e: m.document.pos.e + 0.6, n: m.document.pos.n, h: m.document.pos.h + 0.25 }, -Math.PI / 2);
   m.gull.setMode(1);

@@ -233,7 +233,8 @@ export class DartScene {
       );
       this.buildFerries(f);
       if (f.railway) {
-        this.railway = new RailwayView(f.railway, (e, n) => this.groundAt(e, n), input.detail);
+        // Gull Britannia: no heritage steam train in 1967 (British Railways ran green diesel units to Kingswear).
+        this.railway = new RailwayView(f.railway, (e, n) => this.groundAt(e, n), input.detail, input.era !== '1967');
         this.fixed.add(this.railway.group);
       }
       this.buildMarks(f);
