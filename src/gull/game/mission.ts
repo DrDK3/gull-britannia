@@ -63,6 +63,8 @@ export interface PoopTarget {
   kind: 'guard' | 'tea' | 'soldier' | 'officer' | 'stand';
   radius: number;
   pos: () => V3;
+  /** How it is moving (m/s), if it is: a falling drop is tested against where it will be. */
+  vel?: () => V3;
   active?: () => boolean;
   guard?: Guard;
   /** Any object the mission wants back in `onTargetHit`. */
@@ -800,12 +802,26 @@ export abstract class Mission implements GullHost, GuardHost {
   }
 
   poopTargetOnSegment(from: V3, to: V3): PoopTarget | undefined {
+    return this.poopTargetAt(from, to, 0)?.target;
+  }
+
+  /**
+   * The first target a drop moving from `from` to `to` would hit `lead` seconds from now: a moving target is tested
+   * where it will be by then.
+   */
+  poopTargetAt(from: V3, to: V3, lead: number): { target: PoopTarget; pos: V3 } | undefined {
     for (const t of this.targets) {
       if (t.active && !t.active()) continue;
-      const c = t.pos();
-      if (dist(closestOnSegment(c, from, to), c) <= t.radius) return t;
+      let c = t.pos();
+      if (lead > 0 && t.vel) c = add(c, scale(t.vel(), lead));
+      if (dist(closestOnSegment(c, from, to), c) <= t.radius) return { target: t, pos: c };
     }
     return undefined;
+  }
+
+  /** Where a drop released now would land, and whether that is on a target: the HUD's marker. */
+  dropPrediction(): { point: V3; onTarget: boolean } | undefined {
+    return this.gull.predictDrop(this.world, (a, b, t) => this.poopTargetAt(a, b, t)?.pos);
   }
 
   private onPoopHit(p: Poop, t: PoopTarget, at: V3): void {

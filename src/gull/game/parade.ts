@@ -4,8 +4,9 @@
  * Marcher: a soldier on parade. Marches in formation, eyes front (a soldier on parade does not look up). Flinches
  * when hit; scatters when the formation breaks; then shuffles back into line.
  *
- * AllyGull: a gull of the Bomber Wing. Roosts until signalled, then flies in a box on the player's wing, releases when
- * the leader releases, circles the target once and returns to the roost to reload.
+ * AllyGull: a gull of the Bomber Wing. Roosts until signalled, then flies in a box on the player's wing, releases on
+ * the leader's release (each gull as it comes over its own mark), circles the target once and returns to the roost to
+ * reload.
  */
 import type { Gull } from './gull';
 import { Rng } from './rng';
@@ -158,7 +159,7 @@ export class AllyGull {
   flapPhase = 0;
   private circleCentre: V3 = v3();
   private circleT = 0;
-  private readonly releaseQueue: number[] = [];
+  private readonly releaseQueue: { t: number; vel: V3 }[] = [];
   private dropsLeft = 0;
   private t: number;
 
@@ -183,11 +184,16 @@ export class AllyGull {
     this.vel = v3(0, 0, 4);
   }
 
-  /** The leader released: queue this gull's drops with a little stagger. */
-  release(delay: number): void {
-    if (this.state !== AllyState.Follow || this.dropsLeft <= 0) return;
-    this.dropsLeft -= 2;
-    this.releaseQueue.push(delay, delay + 0.16);
+  /**
+   * The leader released a drop with velocity `vel`. This gull lets go once for each entry of `along`: the distance
+   * (m) along the leader's track, from the leader's mark, at which that drop should land. It flies `slot.z` behind
+   * the leader, so it waits until it has covered `slot.z + along` at `closing` (m/s, the speed over whatever is being
+   * bombed), and its drop then falls just as the leader's did.
+   */
+  release(vel: V3, closing: number, along: readonly number[]): void {
+    if (this.state !== AllyState.Follow || this.dropsLeft < along.length) return;
+    this.dropsLeft -= along.length;
+    for (const a of along) this.releaseQueue.push({ t: Math.max(0, (this.slot.z + a) / Math.max(closing, 3)), vel });
   }
 
   slotPosition(leader: Gull): V3 {
@@ -225,10 +231,11 @@ export class AllyGull {
       case AllyState.Follow:
         desired = this.slotPosition(leader);
         for (let i = this.releaseQueue.length - 1; i >= 0; i--) {
-          this.releaseQueue[i]! -= dt;
-          if (this.releaseQueue[i]! <= 0) {
+          const q = this.releaseQueue[i]!;
+          q.t -= dt;
+          if (q.t <= 0) {
             this.releaseQueue.splice(i, 1);
-            spawnPoop(add(this.pos, v3(0, 0, -0.2)), add(leader.vel, v3(this.rng.range(-0.3, 0.3), this.rng.range(-0.3, 0.3), -1)));
+            spawnPoop(add(this.pos, v3(0, 0, -0.25)), add(q.vel, v3(this.rng.range(-0.15, 0.15), this.rng.range(-0.15, 0.15), 0)));
           }
         }
         break;
@@ -250,11 +257,14 @@ export class AllyGull {
         break;
     }
     const to = sub(desired, this.pos);
-    const maxSpd = this.state === AllyState.Follow ? 34 : 16;
-    let want = scale(to, 2.4);
+    const follow = this.state === AllyState.Follow;
+    const maxSpd = follow ? 36 : 16;
+    // On the leader's wing: fly the leader's own velocity, plus a correction towards the slot. (A correction alone
+    // trails behind the slot by speed / gain: about 4 m at cruising speed, enough to miss a column of men.)
+    let want = follow ? add(leader.vel, scale(to, 3)) : scale(to, 2.4);
     const wl = Math.hypot(want.e, want.n, want.h);
     if (wl > maxSpd) want = scale(want, maxSpd / wl);
-    const k = 1 - Math.exp(-4 * dt);
+    const k = 1 - Math.exp(-(follow ? 9 : 4) * dt);
     this.vel = add(this.vel, scale(sub(want, this.vel), k));
     this.pos = add(this.pos, scale(this.vel, dt));
     if (Math.hypot(this.vel.e, this.vel.n) > 0.5) this.yaw = lerpAngle(this.yaw, Math.atan2(this.vel.e, this.vel.n), 1 - Math.exp(-6 * dt));

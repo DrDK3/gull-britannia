@@ -940,7 +940,7 @@ export class GullGame {
       this.model.pose(at, pose.yaw, g.mode === Mode.Air ? Math.atan2(g.flyDir.h, Math.hypot(g.flyDir.e, g.flyDir.n)) : 0, { time: t, airborne: g.isAirborne(), flapPhase: g.flapPhase, flapping: g.flapping, braking: g.braking, diving: g.diving, tumbling: g.mode === Mode.Tumble, walk: grounded ? Math.min(1, flatSpeed / 2.4) : 0, walkPhase: g.walkPhase, floating, yawRate: g.yawRate, speed: g.speed() }, dt);
       this.missionView?.sync(dt, v.camera, alpha, { pos: this.model.billPosition(), yaw: pose.yaw });
       if (playing && this.settings.dropMarker) {
-        const pred = g.predictDrop(world, (a, b) => m.poopTargetOnSegment(a, b)?.pos());
+        const pred = m.dropPrediction();
         if (pred) {
           v.toScene(pred.point.e, pred.point.n, pred.point.h + 0.05, this.dropRing.position);
           const d = Math.hypot(pred.point.e - g.pos.e, pred.point.n - g.pos.n, pred.point.h - g.pos.h);

@@ -72,6 +72,10 @@ export const M2 = {
 
 export const HITS_TO_BREAK = 4;
 export const CHAOS_TIME = 32;
+/** The parade's spacing (m): between files (across) and ranks (along). The Wing's box matches it. */
+const FILE = 1.6;
+const RANK = 1.8;
+const STILL: V3 = v3();
 
 export class Mission2 extends Mission {
   voronova!: Guard;
@@ -211,25 +215,26 @@ export class Mission2 extends Mission {
     // The parade: twelve men, three files, four ranks.
     for (let r = 0; r < 4; r++) {
       for (let c = 0; c < 3; c++) {
-        const slot = { x: (c - 1) * 1.6, y: r * 1.8 };
+        const slot = { x: (c - 1) * FILE, y: r * RANK };
         const n = this.anchorN - this.dir * slot.y;
         const mm = new Marcher(`marcher-${r}-${c}`, slot, v3(M2.paradeE + slot.x, n, W.groundAt(M2.paradeE + slot.x, n)), this.rng, (e, nn) => W.groundAt(e, nn));
         this.marchers.push(mm);
-        this.addTarget({ kind: 'soldier', radius: 0.72, pos: () => v3(mm.pos.e, mm.pos.n, mm.pos.h + 1.7), owner: mm });
-        this.addTarget({ kind: 'soldier', radius: 0.5, pos: () => v3(mm.pos.e, mm.pos.n, mm.pos.h + 1.2), owner: mm });
+        const vel = () => (mm.state === MarchState.March ? this.marchVelocity() : STILL);
+        this.addTarget({ kind: 'soldier', radius: 0.72, pos: () => v3(mm.pos.e, mm.pos.n, mm.pos.h + 1.7), vel, owner: mm });
+        this.addTarget({ kind: 'soldier', radius: 0.5, pos: () => v3(mm.pos.e, mm.pos.n, mm.pos.h + 1.2), vel, owner: mm });
       }
     }
     this.updateParade(0);
     for (const mm of this.marchers) mm.pos = { ...mm.target };
 
-    // The Bomber Wing, waiting on the hotel roof: a tight box matched to the parade's 1.6 m files and 1.8 m ranks, so
-    // flying along the column puts every wingman over another soldier.
+    // The Bomber Wing, waiting on the hotel roof: a tight box matched to the parade's files and ranks, so that flying
+    // along the column puts each wingman over an outer file (see spawnPoop for how their drops are laid).
     const names = ['Gristle', 'Mrs Wimbush', 'Old Nelson', 'The Padre'];
     const slots = [
-      { x: -1.6, y: -0.3, z: 1.8 },
-      { x: 1.6, y: -0.3, z: 1.8 },
-      { x: -1.6, y: -0.6, z: 3.6 },
-      { x: 1.6, y: -0.6, z: 3.6 },
+      { x: -FILE, y: -0.15, z: RANK },
+      { x: FILE, y: -0.15, z: RANK },
+      { x: -FILE, y: -0.3, z: 2 * RANK },
+      { x: FILE, y: -0.3, z: 2 * RANK },
     ];
     const ro = M2.roost;
     [-4.4, -3.1, 1.8, 3.1].forEach((dn, i) => {
@@ -260,6 +265,11 @@ export class Mission2 extends Mission {
   /** The head of the column (game coordinates). */
   anchor(): V3 {
     return v3(M2.paradeE, this.anchorN, this.world.groundAt(M2.paradeE, this.anchorN));
+  }
+
+  /** How the column is moving (m/s): what a falling drop has to lead. */
+  marchVelocity(): V3 {
+    return this.chaosTimer > 0 || this.turnTimer > 0 ? STILL : v3(0, this.dir * M2.speed, 0);
   }
 
   inZone(): boolean {
@@ -445,13 +455,12 @@ export class Mission2 extends Mission {
     if (!fromFlock && this.flockOut) {
       if (this.releaseTime < 0) this.passHits = 0;
       this.releaseTime = this.elapsed;
-      let i = 0;
-      for (const a of this.allies) {
-        if (a.state === AllyState.Follow) {
-          a.release(0.05 + i * 0.07);
-          i++;
-        }
-      }
+      // The Wing lays a box around the leader's mark: on each side of the leader's track, one drop a rank short of
+      // the mark, one level with it and two beyond. The rear pair take the near two, the front pair the far two, each
+      // letting go as it comes over its own mark; so the box lands the same whichever way the column is marching.
+      const mv = this.marchVelocity();
+      const closing = Math.hypot(vel.e - mv.e, vel.n - mv.n);
+      for (const a of this.allies) a.release(vel, closing, a.slot.z > RANK * 1.5 ? [-RANK, 0] : [RANK, 2 * RANK]);
     }
   }
 

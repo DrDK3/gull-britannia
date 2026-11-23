@@ -593,8 +593,11 @@ export class Gull {
     }
   }
 
-  /** Where a poop released now would land (simulated), and the first target on its way if `target` says so. */
-  predictDrop(world: World, target?: (a: V3, b: V3) => V3 | undefined): { point: V3; onTarget: boolean } | undefined {
+  /**
+   * Where a poop released now would land (simulated), and the first target on its way if `target` says so. `target`
+   * is given the time of flight so far (s), so that it can test moving targets where they will be.
+   */
+  predictDrop(world: World, target?: (a: V3, b: V3, t: number) => V3 | undefined): { point: V3; onTarget: boolean } | undefined {
     if (this.mode !== Mode.Air || this.payload <= 0) return undefined;
     let p = add(this.pos, v3(0, 0, -0.25));
     let v = add(this.vel, v3(0, 0, -1));
@@ -602,7 +605,7 @@ export class Gull {
     for (let i = 0; i < 80; i++) {
       const nv = add(v, v3(0, 0, -POOP_GRAVITY * step));
       const np = add(p, scale(add(v, nv), 0.5 * step));
-      const t = target?.(p, np);
+      const t = target?.(p, np, (i + 0.5) * step);
       if (t) return { point: t, onTarget: true };
       const hit = world.raycast(p, np);
       if (hit) return { point: hit.point, onTarget: false };
