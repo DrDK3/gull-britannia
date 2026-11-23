@@ -174,6 +174,8 @@ The first version of the game (Godot 4, a hand-built and compressed Dartmouth) i
 
 An original parody. The characters, the occupation and the missions are invented. Gulls, people, props, sounds and music are made in code; no third-party art, audio or fonts are included.
 
+The code is released under the MIT licence (`LICENSE`). The River Dart data in `public/geo/` is not: it keeps the licences of its sources (`public/geo/LICENSE.md`).
+
 The scenery is SailSim's River Dart, built from open data:
 
 - Map data © OpenStreetMap contributors, ODbL 1.0, via Overture Maps Foundation; Microsoft ML Building Footprints, ODbL.

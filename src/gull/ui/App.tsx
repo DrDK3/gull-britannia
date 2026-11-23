@@ -62,7 +62,9 @@ function Loading({ st }: { st: GameState }) {
 }
 
 function Title({ game, st }: { game: GullGame; st: GameState }) {
-  const [settings, setSettings] = useState(false);
+  const [view, setView] = useState<'menu' | 'settings' | 'credits'>('menu');
+  const settings = view === 'settings';
+  const setSettings = (on: boolean) => setView(on ? 'settings' : 'menu');
   const done = st.saved.done;
   const unlocked = (i: number) => st.settings.unlockAll || i === 0 || done.includes(OPERATIONS[i - 1]!.id);
   const ops = OPERATIONS.filter((o) => o.playable);
@@ -72,7 +74,7 @@ function Title({ game, st }: { game: GullGame; st: GameState }) {
         <div className="gb-stamp">Section G · Most secret</div>
         <h1>Gull Britannia</h1>
         <p className="gb-tag">Dartmouth, Devon, 1967. The town is under occupation. The gulls are not.</p>
-        {!settings && (
+        {view === 'menu' && (
           <>
             <h3>Operations</h3>
             {ops.map((o, i) => {
@@ -92,9 +94,16 @@ function Title({ game, st }: { game: GullGame; st: GameState }) {
               <b>Free flight</b> <span className="gb-small">— the harbour, no orders</span>
             </button>
             <button onClick={() => setSettings(true)}>Settings</button>
+            <button onClick={() => setView('credits')}>Credits and licences</button>
             <p className="gb-small gb-credits">
-              Scenery: the River Dart from SailSim (open data: Environment Agency LIDAR, OpenStreetMap, Copernicus Sentinel-2), taken back to 1967. An original parody; any resemblance to real gulls is regrettable.
+              Map data © OpenStreetMap contributors (ODbL). Terrain © Environment Agency (OGL v3). Contains modified Copernicus Sentinel data 2025. An original parody; any resemblance to real gulls is regrettable.
             </p>
+          </>
+        )}
+        {view === 'credits' && (
+          <>
+            <Credits />
+            <button onClick={() => setView('menu')}>Back</button>
           </>
         )}
         {settings && (
@@ -104,6 +113,36 @@ function Title({ game, st }: { game: GullGame; st: GameState }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+function Credits() {
+  return (
+    <div className="gb-credits-full">
+      <h3>Credits and licences</h3>
+      <p>
+        Gull Britannia is an original parody. The characters, the occupation and the operations are invented. The gulls, people, props, sounds and music are made in code. The game's code is released under the MIT licence.
+      </p>
+      <p>
+        The scenery is the River Dart from{' '}
+        <a href="https://drdk3.github.io/SailSim/" target="_blank" rel="noreferrer">
+          SailSim
+        </a>
+        , built from open data and taken back to 1967:
+      </p>
+      <ul>
+        <li>
+          Map data ©{' '}
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">
+            OpenStreetMap
+          </a>{' '}
+          contributors, Open Database Licence (ODbL) 1.0, via Overture Maps Foundation; Microsoft ML Building Footprints, ODbL.
+        </li>
+        <li>Terrain © Environment Agency copyright and/or database right 2015. All rights reserved. Open Government Licence v3.0, via Tilezen terrain tiles.</li>
+        <li>Contains modified Copernicus Sentinel data 2025.</li>
+      </ul>
+      <p className="gb-small">Built with three.js, React and Vite. Sources, and what was changed for 1967, are in SOURCES.md in the repository.</p>
     </div>
   );
 }

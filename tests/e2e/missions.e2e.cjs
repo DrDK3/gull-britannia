@@ -1,8 +1,8 @@
 // End-to-end: load the game in Chromium (software WebGL is fine), and fly both missions on the real, captured town.
 // The flying is done by an autopilot that steers the gull's view and presses the same controls a player does.
 //
-//   npm run build && npm run preview &
-//   node tests/e2e/missions.e2e.cjs [http://127.0.0.1:4173/]
+//   npm run build && npm run e2e            (serves dist/ itself and runs every suite)
+//   node tests/e2e/missions.e2e.cjs <url>    (this suite alone, against a server already running)
 //
 // Exits non-zero on any failure. Takes a minute or two (most of it loading under software rendering).
 const { chromium } = require('playwright');
@@ -199,7 +199,7 @@ function suite() {
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(url);
-  await page.waitForFunction(() => ['title', 'error'].includes(window.__gull?.game.state.screen), null, { timeout: 180000, polling: 1000 });
+  await page.waitForFunction(() => ['title', 'error'].includes(window.__gull?.game.state.screen), null, { timeout: 360000, polling: 1000 });
   const screen = await page.evaluate(() => window.__gull.game.state.screen);
   if (screen !== 'title') {
     console.log('FAIL load:', await page.evaluate(() => window.__gull.game.state.error));

@@ -8,7 +8,8 @@ export default defineConfig({
   define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC') },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // Maps are built for debugging (CI keeps them as an artifact) but not referenced from the shipped code.
+    sourcemap: 'hidden',
     // three.js is most of the code and changes only with its version: its own chunk stays cached across
     // deploys (as does React). The app's code is split further where panels are loaded on demand.
     chunkSizeWarningLimit: 800,

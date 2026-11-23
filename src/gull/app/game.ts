@@ -238,14 +238,12 @@ export class GullGame {
     view.setDart(dart);
     // People and props stand on what is drawn (quay tops and pavements sit up to a metre above SailSim's terrain),
     // but not on roofs or treetops overhead.
-    let world: World | undefined;
     const ground = (e: number, n: number) => {
       const g = dart.groundAt(e, n);
-      const top = world ? world.cellTop(e, n) : g;
+      const top = this.world ? this.world.cellTop(e, n) : g;
       return top > g && top < g + 1.2 ? top : g;
     };
-    world = new World({ grids, waterLevel: this.waterLevel(), beyond: (e, n) => dart.groundAt(e, n), ground, bounds: PLAY_BOUNDS });
-    this.world = world;
+    this.world = new World({ grids, waterLevel: this.waterLevel(), beyond: (e, n) => dart.groundAt(e, n), ground, bounds: PLAY_BOUNDS });
     view.setWeather(this.sceneWeather());
     this.publish({ progress: 'Compiling shaders…' });
     this.titleCamera(0);

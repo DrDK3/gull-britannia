@@ -21,8 +21,7 @@ import { Mission, type DropPoint, type Npc, type PoopTarget, type Prop } from '.
 import { v3, type World } from './world';
 
 const PI = Math.PI;
-/** Compass yaws. */
-const NORTH = 0;
+/** Compass yaws (north is 0). */
 const EAST = PI / 2;
 const SOUTH = PI;
 const WEST = -PI / 2;

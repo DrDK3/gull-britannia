@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, lint, test, build, end to end
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - name: Install Chromium for the end-to-end run
+        run: npx playwright install --with-deps chromium
+      - name: End to end (headless Chromium, software WebGL)
+        run: npm run e2e
+      - name: Keep the source maps out of the site
+        run: |
+          mkdir -p maps
+          find dist -name '*.map' -exec mv {} maps/ \;
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: dist
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-maps
+          path: maps
+          retention-days: 30
+
+  deploy:
+    name: Publish to GitHub Pages
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: dist
+      - name: Replace the site, keeping the previous build's hashed assets
+        # A page cached from the previous deploy still asks for that build's files for a few minutes: keep one
+        # generation of them (listed in assets/.current) so it does not break mid-visit.
+        run: |
+          cd site
+          keep=""
+          if [ -f assets/.current ]; then keep=$(cat assets/.current); fi
+          find . -mindepth 1 -maxdepth 1 ! -name .git ! -name assets -exec rm -rf {} +
+          if [ -d assets ]; then
+            for f in assets/*; do
+              [ -e "$f" ] || continue
+              name=$(basename "$f")
+              echo "$keep" | grep -qxF "$name" || rm -f "$f"
+            done
+          fi
+          cp -r ../dist/. .
+          (cd ../dist/assets && ls -1) > assets/.current
+          touch .nojekyll
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The site is unchanged."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Deploy ${GITHUB_SHA}"
+          git push origin gh-pages
