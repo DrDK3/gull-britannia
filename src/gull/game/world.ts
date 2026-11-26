@@ -8,7 +8,12 @@
  *
  * Frame: SailSim's local metres, e east and n north of the RDYC origin; h is height above Ordnance Datum Newlyn
  * (m ODN). The scene draws y = h − waterLevel (src/render/scene.ts).
+ *
+ * The air moves too: `setWind` gives the world a wind (flight/wind.ts: slower near the ground and in the lee,
+ * rising on windward slopes), `wind(e, n, h)` reads it, and `tick(dt)` moves its gusts on. A world with no wind set
+ * has still air.
  */
+import { WindField, type WindSpec } from './flight/wind';
 
 export interface V3 {
   e: number;
@@ -124,6 +129,14 @@ export class World {
   /** Bare ground where people walk (no roofs or tree crowns), m ODN. */
   private readonly ground?: (e: number, n: number) => number;
 
+  /** The wind, if there is one (setWind). */
+  private windField?: WindField;
+  /**
+   * The stream at (e, n) (m/s), if whoever built the world knows it: a gull afloat drifts with it. Optional; the
+   * application can set it from SailSim's tidal stream.
+   */
+  current?: (e: number, n: number) => { e: number; n: number };
+
   constructor(o: { grids: Grid[]; waterLevel: number; beyond?: (e: number, n: number) => number; ground?: (e: number, n: number) => number; bounds?: World['bounds'] }) {
     // Finest first: cellTop and cellBox take the first grid that covers a point.
     this.grids = [...o.grids].sort((a, b) => a.cell - b.cell);
@@ -132,6 +145,28 @@ export class World {
     this.ground = o.ground;
     const g = this.grids[this.grids.length - 1];
     this.bounds = o.bounds ?? (g ? { eMin: g.e0, eMax: g.e0 + g.nx * g.cell, nMin: g.n0, nMax: g.n0 + g.ny * g.cell } : { eMin: -1e4, eMax: 1e4, nMin: -1e4, nMax: 1e4 });
+  }
+
+  // ------------------------------------------------------------------ the air
+
+  /** Give the world a wind (or none). Its gusts start from time zero, so the same seed plays the same way. */
+  setWind(spec?: WindSpec): void {
+    this.windField = spec && spec.speed > 0 ? new WindField((e, n) => Math.max(this.cellTop(e, n), this.waterLevel), spec) : undefined;
+  }
+
+  /** The wind as it was set (speed at 10 m in m/s, where from, gustiness), or undefined in still air. */
+  get windSpec(): Readonly<Required<WindSpec>> | undefined {
+    return this.windField?.spec;
+  }
+
+  /** The air's velocity at a point (m/s; h is up), `ahead` seconds from now. Zero in still air. */
+  wind(e: number, n: number, h: number, ahead = 0): V3 {
+    return this.windField ? this.windField.at(e, n, h, ahead) : { e: 0, n: 0, h: 0 };
+  }
+
+  /** Move the world's own clock on (the gusts). A mission calls this once a step. */
+  tick(dt: number): void {
+    if (this.windField) this.windField.time += dt;
   }
 
   /** The highest top within `r` of (e, n): where to put a perch on a narrow wall or a ridge. */
