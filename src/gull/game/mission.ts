@@ -6,12 +6,15 @@
  * is queued in `events` for the controller to drain each frame. DOM-free.
  */
 import type { ActionId } from './actions';
-import type { AmbientGull } from './ambient';
+import { ALERT_LEVEL_NAMES, AlertLadder, HEAT, type AlertIncident, type AlertLevelId } from './alert';
+import { AmbientFlock, type AmbientGull } from './ambient';
+import { BENEATH_NOTICE, JUST_A_GULL, NOTE_PER_CONSPICUOUS, STARE_DIST, conspicuousLevel, conspicuousness, type Conspicuousness, type GullFacts } from './conspicuous';
 import { DROP_IMPACT, Gull, Mode, POOP_GRAVITY, type GullControls, type GullHost, type GullProfile, type Perch } from './gull';
-import { Guard, GuardState, type GuardHost, type GuardStateId } from './guard';
+import { FLAP_HEARING, Guard, GuardState, gullNoise, type GuardHost, type GuardStateId, type NoiseKind } from './guard';
 import { Item, ItemState, type ItemKind } from './items';
 import type { AllyGull, Marcher } from './parade';
 import { Rng } from './rng';
+import { CLEAN_ESCAPE_POINTS, ORDNANCE_CAP, STEALTH_POINTS, approachOf, hitsOnTarget, ordnanceScore, type Approach } from './scoring';
 import { World, add, closestOnSegment, dist, dist2d, scale, v3, type Solid, type V3 } from './world';
 
 export type Tone = 'good' | 'food' | 'warn' | 'bad' | 'info';
@@ -129,6 +132,41 @@ export interface Results {
   time: number;
   stats: MissionStats;
   debrief: string;
+  /** 'compromised': the operation was lost (never the operative). The review says so and offers another go. */
+  outcome: 'complete' | 'compromised';
+  /** How the job was done, when it was done: Ghost, Saboteur, Shadow or Hooligan. */
+  approach?: Approach;
+  /** The highest the alert ladder went: 'calm', 'suspicious', 'searching' or 'alarmed'. */
+  alertPeak: string;
+}
+
+/** Someone who may be taking an interest in the gull: where he is from the gull, and how much he cares. */
+export interface Noticer {
+  id: string;
+  name: string;
+  /** Compass bearing from the gull to him (rad, 0 north, clockwise). */
+  bearing: number;
+  /** The same, from the way the gull is looking: 0 dead ahead, > 0 to the right, ±π behind. */
+  relBearing: number;
+  distance: number;
+  /** 0 (no interest) to 1 (an alert). */
+  strength: number;
+  /** He can see or hear the gull now. */
+  sees: boolean;
+  /** He is taking an interest now: his suspicion is rising. */
+  noticing: boolean;
+  /** 'routine', 'suspicious', 'alert'… (GUARD_STATE_NAMES). */
+  state: string;
+  civilian: boolean;
+}
+
+/** A sound someone made, for the view to draw as a ring while it is fresh. */
+export interface Noise {
+  at: V3;
+  radius: number;
+  kind: NoiseKind;
+  /** Seconds since it was made. */
+  age: number;
 }
 
 export interface MissionStats {
@@ -150,8 +188,28 @@ export interface MissionStats {
   nearMisses: number;
   recoveredByGuard: number;
   flockHits: number;
+  /** Hits by target (a guard's id, 'tea:<guard>', a marcher's id): repeats on one target are worth less. */
+  hitsByTarget: Record<string, number>;
+  /** First hits on a target from a long way up. */
+  longFirstHits: number;
+  /** Hits on the people watching, and on their tea. */
+  watcherHits: number;
+  /** Times a soldier wondered about the gull (the question mark). */
+  questions: number;
+  /** Times a civilian shouted at it. */
+  shouts: number;
+  /** Long calls given. */
+  calls: number;
+  /** The highest the alert ladder went (0 calm … 3 alarmed). */
+  alertPeak: number;
 }
 
+/** Hovering: in the air and slower than this (m/s), no more than this far above a cordon's top (m). */
+const HOVER_SPEED = 6;
+const HOVER_ABOVE = 9;
+/** Sitting about counts as loitering this near a cordon's middle, or a soldier on duty (m). */
+const LOITER_NEAR_ZONE = 14;
+const LOITER_NEAR_GUARD = 12;
 const GRAB_RANGE_GROUND = 1.5;
 const GRAB_RANGE_AIR = 2.6;
 const PROMPT_RANGE = 4.5;
@@ -170,15 +228,35 @@ export abstract class Mission implements GullHost, GuardHost {
   drops: DropPoint[] = [];
   targets: PoopTarget[] = [];
   objectives: Objective[] = [];
-  restricted: { e: number; n: number; h: number; radius: number; height: number }[] = [];
+  /** Cordons: a gull inside one is noteworthy to any guard who sees it. `label` is what it guards ("the table"). */
+  restricted: { e: number; n: number; h: number; radius: number; height: number; label?: string }[] = [];
   props: Prop[] = [];
   npcs: Npc[] = [];
   /** Soldiers on parade (Mission 2). */
   marchers: Marcher[] = [];
   /** The Bomber Wing (Mission 2). */
   allies: AllyGull[] = [];
-  /** The town's other gulls (ambient.ts): the view draws whatever is here. */
-  ambient: AmbientGull[] = [];
+  /** The town's other gulls: the flock moves them, the view draws whatever is in `ambient` (the same birds). */
+  readonly flock: AmbientFlock;
+  ambient: AmbientGull[];
+  /** The garrison's memory of the gull: calm, suspicious, searching, alarmed (alert.ts). */
+  readonly alert = new AlertLadder();
+  /** How much Scrumpy stands out from the other gulls now, 0 to 1, and the main reason as a short phrase. */
+  conspicuousness = 0;
+  conspicuousReason = JUST_A_GULL;
+  /** Everyone who might take an interest, with bearing and strength: for the HUD's who-is-noticing-me. */
+  noticers: Noticer[] = [];
+  /** Sounds made in the last second or two (a shout, a whistle, a long call). */
+  noises: Noise[] = [];
+  /** How far off the gull's wings can be heard now (m): 0 on a glide. */
+  noiseRadius = 0;
+  /** Gulls near Scrumpy doing what Scrumpy is doing. */
+  company = 0;
+  /** Seconds Scrumpy has sat alone near something guarded. */
+  loiter = 0;
+  outcome: 'complete' | 'compromised' = 'complete';
+  /** The most a payload can earn in this operation (scoring.ts). */
+  ordnanceCap = ORDNANCE_CAP;
   poops: Poop[] = [];
   thrown: Thrown[] = [];
   events: MissionEvent[] = [];
@@ -208,6 +286,13 @@ export abstract class Mission implements GullHost, GuardHost {
     nearMisses: 0,
     recoveredByGuard: 0,
     flockHits: 0,
+    hitsByTarget: {},
+    longFirstHits: 0,
+    watcherHits: 0,
+    questions: 0,
+    shouts: 0,
+    calls: 0,
+    alertPeak: 0,
   };
 
   private grabBuffer = 0;
@@ -220,12 +305,18 @@ export abstract class Mission implements GullHost, GuardHost {
   private tensionHold = 0;
   private readonly timers: { t: number; fn: () => void }[] = [];
   private itemSeq = 0;
+  private callHeat = 0;
+  private callCooldown = 0;
+  private thievingTimer = 0;
+  private topHandled = false;
 
   constructor(
     readonly world: World,
     seed = 1967,
   ) {
     this.rng = new Rng(seed);
+    this.flock = new AmbientFlock(seed);
+    this.ambient = this.flock.gulls;
   }
 
   /** Build the mission (call once, after construction). */
@@ -246,10 +337,16 @@ export abstract class Mission implements GullHost, GuardHost {
   protected onSplat(_at: V3): void {}
   protected onTagged(_g: Guard): void {}
   protected onPerchedHook(_p: Perch): void {}
-  /** G: signal (Mission 2's flock). True if it did something. */
+  /** G: signal (Mission 2's flock). True if it did something; otherwise the gull gives a long call. */
   protected onSignal(): boolean {
     return false;
   }
+  /** The alert ladder moved from `prev` to `level`: change the level to match. */
+  protected onAlertLevel(_level: AlertLevelId, _prev: AlertLevelId): void {}
+  /** The alert ladder reached the top (once). */
+  protected onAlertTop(): void {}
+  /** A covered item had its weight knocked off. */
+  protected onItemUncovered(_it: Item): void {}
   protected resultLines(): [string, number][] {
     return [];
   }
@@ -423,12 +520,16 @@ export abstract class Mission implements GullHost, GuardHost {
   step(dt: number, c: GullControls, poop = false): void {
     this.updateFloating();
     this.gull.step(dt, c, this.world, this);
+    this.flock.update(dt);
     if (!this.running) {
       this.stepItems(dt);
       return;
     }
     this.elapsed += dt;
     if (poop) this.gull.poop(this);
+    // A long call, if the flight model reports one of its own (G also gives one: see signal).
+    const called = this.gull.events as { longCall?: boolean; call?: boolean };
+    if (called.longCall || called.call) this.longCall();
     this.setDownTimer = Math.max(this.setDownTimer - dt, 0);
     if (this.grabBuffer > 0) {
       this.grabBuffer -= dt;
@@ -447,6 +548,7 @@ export abstract class Mission implements GullHost, GuardHost {
     this.stepThrown(dt);
     this.updateTagging(dt);
     this.updateTension(dt);
+    this.updateStealth(dt);
     for (let i = this.timers.length - 1; i >= 0; i--) {
       const tm = this.timers[i]!;
       tm.t -= dt;
@@ -507,6 +609,7 @@ export abstract class Mission implements GullHost, GuardHost {
   private updateTension(dt: number): void {
     let t = 0;
     for (const g of this.guards) {
+      if (g.civilian) continue;
       if (g.state === GuardState.Alert) t = 2;
       else if ((g.state === GuardState.Search || g.state === GuardState.Suspicious || g.state === GuardState.Investigate) && t < 1) t = 1;
     }
@@ -637,6 +740,16 @@ export abstract class Mission implements GullHost, GuardHost {
 
   private grab(it: Item): void {
     if (this.beak) return;
+    if (it.covered) {
+      // Something has been put on it: the first pull only knocks that off, and it does not fall quietly.
+      it.covered = false;
+      this.sfx('bonk', it.pos, -2, 1.5);
+      this.toast(`Knocked the weight off the ${it.name.toLowerCase()}. Again, to take it.`, 'warn');
+      this.emitNoise(it.pos, 14, 'clatter');
+      this.onItemUncovered(it);
+      return;
+    }
+    if (it.watched) this.thievingTimer = 6;
     const wasLoose = it.state === ItemState.Loose;
     it.hold();
     this.beak = it;
@@ -828,14 +941,24 @@ export abstract class Mission implements GullHost, GuardHost {
     return this.gull.predictDrop(this.world, (a, b, t) => this.poopTargetAt(a, b, t)?.pos);
   }
 
+  /** What a hit on this target is counted against: repeats on one target are worth less each time. */
+  targetKey(t: PoopTarget): string {
+    if (t.kind === 'guard' && t.guard) return t.guard.id;
+    if (t.kind === 'tea') return `tea:${t.guard?.id ?? ''}`;
+    return (t.owner as { id?: string } | undefined)?.id ?? t.kind;
+  }
+
   private onPoopHit(p: Poop, t: PoopTarget, at: V3): void {
     if (p.fromFlock) this.stats.flockHits++;
     else {
       this.stats.hits++;
       this.stats.targetHits[t.kind] = (this.stats.targetHits[t.kind] ?? 0) + 1;
+      const key = this.targetKey(t);
+      const n = (this.stats.hitsByTarget[key] = (this.stats.hitsByTarget[key] ?? 0) + 1);
       const fall = p.releaseH - at.h;
       if (fall > 15) {
         this.stats.longDrops++;
+        if (n === 1) this.stats.longFirstHits++;
         this.toast(`LONG DROP (${Math.floor(fall)} m)`, 'good');
       }
     }
@@ -844,16 +967,18 @@ export abstract class Mission implements GullHost, GuardHost {
     if (t.kind === 'guard' && t.guard) {
       if (!p.fromFlock) {
         this.stats.guardHits++;
+        this.stats.watcherHits++;
         this.toast(`DIRECT HIT — ${t.guard.name.toUpperCase()}`, 'good');
       }
-      t.guard.onPooped('uniform');
+      t.guard.onPooped('uniform', !p.fromFlock);
     } else if (t.kind === 'tea') {
       if (!p.fromFlock) {
         this.stats.teaHits++;
+        this.stats.watcherHits++;
         this.toast('TEA COMPROMISED', 'good');
       }
       this.sfx('tea', at, 0);
-      if (t.guard) t.guard.onPooped('tea');
+      if (t.guard) t.guard.onPooped('tea', !p.fromFlock);
     }
     this.onTargetHit(t, p);
   }
@@ -876,27 +1001,213 @@ export abstract class Mission implements GullHost, GuardHost {
     return this.world.lineOfSight(a, b);
   }
 
-  /** How interesting the gull is to a guard right now (0 = just a gull). */
-  noteworthiness(_g: Guard, d: number): number {
+  /**
+   * How interesting the gull is to a guard right now (0 = just a gull): its conspicuousness as he would judge it, on
+   * the guards' scale (papers 1.4). Below BENEATH_NOTICE he does not give it a thought.
+   */
+  noteworthiness(g: Guard, d: number): number {
+    if (g.civilian) return this.civilianInterest(g, d);
+    const c = this.conspicuousnessFor(g, d).value;
+    return c < BENEATH_NOTICE ? 0 : c * NOTE_PER_CONSPICUOUS;
+  }
+
+  /** A civilian minds her own goods and nothing else: a gull at them, or away with them, or under her feet. */
+  private civilianInterest(g: Guard, d: number): number {
+    const hers = g.guardedItem;
+    if (hers && this.beak === hers) return 1.2;
+    if (hers && hers.state === ItemState.Placed && dist(this.gull.pos, hers.pos) < 2.2) return 0.75;
+    return d < 2.2 ? 0.42 : 0;
+  }
+
+  /** How conspicuous the gull is to this guard, `d` metres off: the general facts, and how he is placed. */
+  conspicuousnessFor(g: Guard, d: number): Conspicuousness {
+    return conspicuousness(this.gullFacts(g, d));
+  }
+
+  /** What the gull is doing, as plain facts for conspicuous.ts; with a guard, as he would judge it. */
+  gullFacts(guard?: Guard, d = Infinity): GullFacts {
     const gull = this.gull;
-    let n = 0;
-    const it = this.beak;
-    if (it?.isMission) n = 1.4;
     const gp = gull.pos;
-    for (const z of this.restricted) if (dist2d(gp, z) < z.radius && gp.h < z.h + z.height) n = Math.max(n, 1);
-    if (d < 4.5) n = Math.max(n, 0.8);
-    else if (d < 9 && gull.speed() > 13) n = Math.max(n, 0.5);
-    if (gull.isPerched() && !it?.isMission && d > 4.5) n *= 0.5;
-    return n;
+    const it = this.beak;
+    const airborne = gull.isAirborne();
+    let inCordon = false;
+    let hovering = false;
+    let zoneLabel = 'the table';
+    for (const z of this.restricted) {
+      const flat = dist2d(gp, z);
+      const top = z.h + z.height;
+      if (flat < z.radius && gp.h < top) {
+        inCordon = true;
+        zoneLabel = z.label ?? zoneLabel;
+      } else if (!inCordon && gull.mode === Mode.Air && gull.speed() < HOVER_SPEED && flat < z.radius + 2 && gp.h >= top && gp.h < top + HOVER_ABOVE) {
+        hovering = true;
+        zoneLabel = z.label ?? zoneLabel;
+      }
+    }
+    let thieving = this.thievingTimer > 0;
+    if (!thieving) for (const f of this.items) if (f.watched && f.state === ItemState.Placed && dist(gp, f.pos) < 2.2) thieving = true;
+    let staring = false;
+    if (guard && gull.scouting && d < STARE_DIST) {
+      const head = guard.headPosition();
+      const eye = gull.eye();
+      const look = gull.lookDir();
+      const l = Math.max(dist(head, eye), 1e-6);
+      staring = ((head.e - eye.e) * look.e + (head.n - eye.n) * look.n + (head.h - eye.h) * look.h) / l > Math.cos((10 * Math.PI) / 180);
+    }
+    return {
+      papers: !!it?.isMission,
+      inCordon,
+      hovering,
+      zoneLabel,
+      airborne,
+      settled: !airborne && gull.speed() < 0.6,
+      speed: gull.speed(),
+      loiter: this.loiter,
+      thieving,
+      food: !!it?.isFood,
+      calling: this.callHeat,
+      company: this.company,
+      guardDist: guard ? d : undefined,
+      staring,
+      guardLabel: guard?.label,
+    };
+  }
+
+  /** Soldiers on duty: the people the alert ladder and the stealth score are about. */
+  soldiers(): Guard[] {
+    return this.guards.filter((g) => !g.civilian);
   }
 
   guardTension(): number {
-    return this.guards.some((g) => g.state === GuardState.Alert || g.state === GuardState.Search) ? 2 : 0;
+    return this.guards.some((g) => !g.civilian && (g.state === GuardState.Alert || g.state === GuardState.Search)) ? 2 : 0;
+  }
+
+  /** Is the gull near something a soldier is there to guard: a cordon, or the man himself? */
+  private nearGuarded(): boolean {
+    const gp = this.gull.pos;
+    for (const z of this.restricted) if (Math.hypot(gp.e - z.e, gp.n - z.n, gp.h - (z.h + 1)) < LOITER_NEAR_ZONE) return true;
+    for (const g of this.guards) if (!g.civilian && !g.offDuty && dist(gp, g.pos) < LOITER_NEAR_GUARD) return true;
+    return false;
+  }
+
+  /** Each step: the gull's cover and conspicuousness, who is noticing, sounds, and the alert ladder. */
+  private updateStealth(dt: number): void {
+    const gull = this.gull;
+    const airborne = gull.isAirborne();
+    this.company = this.flock.companyOf(gull.pos, airborne);
+    const settled = !airborne && gull.speed() < 0.6;
+    if (settled && this.company === 0 && this.nearGuarded()) this.loiter += dt;
+    else this.loiter = Math.max(this.loiter - 4 * dt, 0);
+    this.callHeat = Math.max(this.callHeat - dt / 4, 0);
+    this.callCooldown = Math.max(this.callCooldown - dt, 0);
+    this.thievingTimer = Math.max(this.thievingTimer - dt, 0);
+    this.noiseRadius = FLAP_HEARING * gullNoise(gull);
+    for (let i = this.noises.length - 1; i >= 0; i--) {
+      const n = this.noises[i]!;
+      n.age += dt;
+      if (n.age > 1.6) this.noises.splice(i, 1);
+    }
+    // For the HUD: as the soldier who would think worst of it sees it, or as nobody does.
+    let worst = conspicuousness(this.gullFacts());
+    const view = gull.yaw;
+    const noticers: Noticer[] = [];
+    let stirred = false;
+    for (const g of this.guards) {
+      const d = dist(g.headPosition(), gull.eye());
+      if (!g.civilian && !g.offDuty && d < 40) {
+        const c = this.conspicuousnessFor(g, d);
+        if (c.value > worst.value) worst = c;
+      }
+      const st = g.state;
+      const roused = st === GuardState.Suspicious || st === GuardState.Investigate || st === GuardState.Alert || st === GuardState.Search;
+      if (!g.civilian && (roused || g.noticing)) stirred = true;
+      if (d > 120) continue;
+      const bearing = Math.atan2(g.pos.e - gull.pos.e, g.pos.n - gull.pos.n);
+      const rel = Math.atan2(Math.sin(bearing - view), Math.cos(bearing - view));
+      const strength = roused || g.noticing ? Math.max(g.suspicion / 100, g.noticing ? 0.08 : 0) : 0;
+      noticers.push({ id: g.id, name: g.name, bearing, relBearing: rel, distance: d, strength: Math.min(strength, 1), sees: g.seesGull, noticing: g.noticing, state: g.stateName, civilian: g.civilian });
+    }
+    this.noticers = noticers;
+    this.conspicuousness = worst.value;
+    this.conspicuousReason = worst.reason;
+    const prev = this.alert.level;
+    const now = this.alert.update(dt, stirred);
+    if (now !== prev) this.alertChanged(prev, now);
+  }
+
+  /** A word for the conspicuousness now: 'just a gull', 'odd', 'conspicuous' or 'very conspicuous'. */
+  get conspicuousLevel(): string {
+    return conspicuousLevel(this.conspicuousness);
+  }
+
+  /** The guards who are taking an interest now, strongest first. */
+  noticing(): Noticer[] {
+    return this.noticers.filter((n) => n.strength > 0).sort((a, b) => b.strength - a.strength);
+  }
+
+  // ------------------------------------------------------------------ the alert ladder, and sounds
+
+  /** An incident for the alert ladder. */
+  raiseAlert(kind: AlertIncident, add: number): void {
+    const prev = this.alert.level;
+    const now = this.alert.raise(kind, add, this.elapsed);
+    if (now !== prev) this.alertChanged(prev, now);
+    if (this.alert.toppedOut && !this.topHandled) {
+      this.topHandled = true;
+      this.onAlertTop();
+    }
+  }
+
+  private alertChanged(prev: AlertLevelId, now: AlertLevelId): void {
+    this.stats.alertPeak = this.alert.peak;
+    for (const g of this.guards) if (!g.civilian) g.vigilance = now;
+    if (now > prev) {
+      this.banner(`ALERT: ${ALERT_LEVEL_NAMES[now].toUpperCase()}`, now >= 2 ? 'bad' : 'warn', 2.2);
+      this.sfx('alert', undefined, -8);
+    } else this.toast(`Alert: ${ALERT_LEVEL_NAMES[now]}`, 'info');
+    this.onAlertLevel(now, prev);
+  }
+
+  /**
+   * Someone made a sound at `at` that carries `radius` metres: every guard in earshot (but not `source`) hears it
+   * (Guard.hearNoise). Returns how many it reached.
+   */
+  emitNoise(at: V3, radius: number, kind: NoiseKind, source?: Guard): number {
+    this.noises.push({ at: { ...at }, radius, kind, age: 0 });
+    let heard = 0;
+    for (const g of this.guards) {
+      if (g === source || dist(g.pos, at) > radius) continue;
+      if (g.hearNoise(at, kind)) heard++;
+    }
+    return heard;
+  }
+
+  /**
+   * The gull's long call: head back, the whole harbour hears it. Gulls nearby answer, and the flighty ones go up;
+   * soldiers in earshot look up at the caller, and their round waits while they do. It turns heads, and it costs: for
+   * a few seconds the caller is the most noticeable gull in Dartmouth.
+   */
+  longCall(): void {
+    if (!this.running || this.callCooldown > 0) return;
+    this.callCooldown = 1.2;
+    this.stats.calls++;
+    this.callHeat = 1;
+    this.sfx('squawk', undefined, -2, 0.95 + ((this.stats.calls * 7) % 15) / 100);
+    this.flock.answerCall(this.gull.pos, 40);
+    if (this.emitNoise(this.gull.pos, 25, 'call') > 0) this.raiseAlert('call', HEAT.call);
   }
 
   // ------------------------------------------------------------------ guard callbacks
 
   onGuardAlert(g: Guard): void {
+    if (g.civilian) {
+      // She has no whistle; she has lungs. The nearest soldier comes to see what the matter is.
+      this.stats.shouts++;
+      this.sfx('huh', g.headPosition(), 4, 0.7);
+      this.raiseAlert('shout', HEAT.shout);
+      this.emitNoise(g.headPosition(), 32, 'shout', g);
+      return;
+    }
     this.stats.spotted++;
     this.banner('SPOTTED', 'bad', 2);
     this.sfx('alert', undefined, -4);
@@ -905,26 +1216,47 @@ export abstract class Mission implements GullHost, GuardHost {
       this.stats.cleanEscape = false;
     }
     if (this.stats.spotted === 1) this.say('Mother', `${g.name} has seen you! Break line of sight — over the rooftops — and he’ll search where he last saw you.`, 5.5);
+    this.raiseAlert('spotted', HEAT.spotted);
+    // His whistle carries: the next man is on edge, and looks.
+    this.emitNoise(g.headPosition(), 32, 'whistle', g);
   }
 
   onGuardState(g: Guard, prev: GuardStateId, now: GuardStateId): void {
+    if (g.civilian) return;
     if (prev === GuardState.Alert && now === GuardState.Search) {
       this.banner('LINE OF SIGHT BROKEN', 'warn', 2);
       this.sfx('lost', undefined, -4);
       this.sayOnce('lost_1', 'Mother', 'He’s lost you. He’ll search where he last saw you, then go back to his routine.', 5);
     } else if (prev === GuardState.Search && now === GuardState.Return) this.toast(`${g.name} gave up the search`, 'good');
-    else if (now === GuardState.Suspicious && (prev === GuardState.Routine || prev === GuardState.Return)) this.banner('SUSPICIOUS', 'warn', 1.2);
+    else if (now === GuardState.Suspicious && (prev === GuardState.Routine || prev === GuardState.Return || prev === GuardState.Distracted)) {
+      this.banner('SUSPICIOUS', 'warn', 1.2);
+      this.stats.questions++;
+      this.raiseAlert('question', HEAT.question);
+    }
   }
 
   onTheftDiscovered(g: Guard): void {
+    const first = !this.stats.theftDiscovered;
     this.stats.theftDiscovered = true;
+    for (const o of this.guards) if (!o.civilian && o.guardedItem === g.guardedItem) o.discoveredTheft = true;
+    if (!first) return;
     this.banner('THEFT DISCOVERED', 'warn', 2.5);
     this.say('Mother', `${g.name} has noticed it’s gone. He’ll be jumpy for a while — any gull near him will draw his eye.`, 5);
+    this.raiseAlert('theft', HEAT.theft);
   }
 
   onItemRecovered(_g: Guard): void {
     this.stats.recoveredByGuard++;
     this.say('Mother', 'He’s put it back where it was. Regroup, and try again.', 4);
+    this.raiseAlert('recovered', HEAT.recovered);
+  }
+
+  onGuardHit(g: Guard, n: number, kind: string): void {
+    if (g.civilian) return;
+    if (kind === 'tea' && n === 1) this.raiseAlert('tea', HEAT.tea);
+    else this.raiseAlert('hit', HEAT.hit[Math.min(n, HEAT.hit.length) - 1]!);
+    if (n === 2) this.sayOnce('hit_twice', 'Mother', 'Once is bad luck. Twice is a pattern, and he has noticed.', 4);
+    else if (n === 3) this.sayOnce('hit_thrice', 'Mother', 'Three times is a hobby, Scrumpy. He knows it is you.', 4);
   }
 
   // ------------------------------------------------------------------ gull callbacks (GullHost)
@@ -1005,7 +1337,7 @@ export abstract class Mission implements GullHost, GuardHost {
 
   signal(): void {
     if (!this.running) return;
-    if (!this.onSignal()) this.sfx('squawk', undefined, -2, 0.95 + this.rng.next() * 0.15);
+    if (!this.onSignal()) this.longCall();
   }
 
   // ------------------------------------------------------------------ HUD support
@@ -1030,8 +1362,11 @@ export abstract class Mission implements GullHost, GuardHost {
     return '';
   }
 
+  /** The running score: food, and hits with repeats on one target discounted. Kept for whoever wants it; not a HUD must. */
   liveScore(): number {
-    return this.foodTotal() + this.stats.hits * 40;
+    let hits = 0;
+    for (const n of Object.values(this.stats.hitsByTarget)) hits += hitsOnTarget(n);
+    return this.foodTotal() + Math.min(hits, this.ordnanceCap);
   }
 
   // ------------------------------------------------------------------ completion and review
@@ -1040,6 +1375,23 @@ export abstract class Mission implements GullHost, GuardHost {
     if (this.completed) return;
     this.completed = true;
     this.finishTimer = delay;
+  }
+
+  /**
+   * The operation is lost: what Section G wanted has gone, and the review will say Compromised and offer another go.
+   * Nobody is hurt; Mother is disappointed.
+   */
+  compromise(delay = 4): void {
+    if (this.completed) return;
+    this.outcome = 'compromised';
+    this.banner('COMPROMISED', 'bad', 3);
+    this.sfx('lost', undefined, -2);
+    this.completeMission(delay);
+  }
+
+  /** How the job was done, for the review (scoring.ts). */
+  approach(): Approach {
+    return approachOf({ spotted: this.stats.spotted, questions: this.stats.questions, watcherHits: this.stats.watcherHits });
   }
 
   private finish(): void {
@@ -1059,20 +1411,25 @@ export abstract class Mission implements GullHost, GuardHost {
     }
     const { drops, hits } = this.stats;
     if (drops > 0) {
-      const acc = hits / drops;
-      let pts = hits * 40;
-      if (hits >= 2 && acc >= 0.75) pts += 100;
-      lines.push([`Accuracy: ${hits} of ${drops} drops on target (${Math.round(acc * 100)}%)`, pts]);
-      if (this.stats.longDrops > 0) lines.push(['   Long-range drops', this.stats.longDrops * 25]);
+      const ord = ordnanceScore(this.stats, this.ordnanceCap);
+      const sum = ord.hitPoints + ord.accuracyBonus + ord.longPoints;
+      lines.push([`Accuracy: ${hits} of ${drops} drops on target (${Math.round((hits / drops) * 100)}%)`, ord.hitPoints + ord.accuracyBonus]);
+      if (ord.repeats > 0) lines.push([`   Repeat hits on one target (${ord.repeats}): worth less each time`, 0]);
+      if (ord.longPoints > 0) lines.push(['   Long-range drops', ord.longPoints]);
+      if (ord.capped) lines.push(['   Over the allowance for one operation', ord.total - sum]);
     }
-    const done = this.primaryDone();
+    const compromised = this.outcome === 'compromised';
+    const done = this.primaryDone() && !compromised;
     const sp = this.stats.spotted;
-    if (!done) lines.push(['Stealth, escape and time bonuses: operation incomplete', 0]);
-    else if (sp === 0) lines.push(['Stealth: never spotted', 300]);
-    else if (sp === 1) lines.push(['Stealth: spotted once', 120]);
+    if (compromised) lines.push(['Operation compromised: stealth, escape and time bonuses withheld', 0]);
+    else if (!done) lines.push(['Stealth, escape and time bonuses: operation incomplete', 0]);
+    else if (sp === 0) lines.push(['Stealth: never spotted', STEALTH_POINTS.unseen]);
+    else if (sp === 1) lines.push(['Stealth: spotted once', STEALTH_POINTS.once]);
     else lines.push([`Stealth: spotted ${sp} times`, 0]);
-    if (done && this.stats.cleanEscape) lines.push(['Clean escape: never seen with the goods', 200]);
+    if (done && this.stats.cleanEscape) lines.push(['Clean escape: never seen with the goods', CLEAN_ESCAPE_POINTS]);
     else if (done) lines.push(['Clean escape: seen with the goods', 0]);
+    const approach = done ? this.approach() : undefined;
+    if (approach) lines.push([`Approach: ${approach.title}. ${approach.citation}`, approach.points]);
     if (this.stats.tagged > 0) lines.push([`Reconnaissance: ${this.stats.tagged} tagged`, 50 * this.stats.tagged]);
     if (done) {
       const tb = this.elapsed <= this.parTime ? 150 : this.elapsed <= this.parTime * 1.5 ? 75 : 0;
@@ -1088,6 +1445,10 @@ export abstract class Mission implements GullHost, GuardHost {
         break;
       }
     }
+    if (compromised) {
+      grade = '—';
+      gradeTitle = 'Compromised';
+    }
     return {
       missionId: this.id,
       title: this.title,
@@ -1099,13 +1460,18 @@ export abstract class Mission implements GullHost, GuardHost {
       time: this.elapsed,
       stats: JSON.parse(JSON.stringify(this.stats)) as MissionStats,
       debrief: this.debriefText(),
+      outcome: this.outcome,
+      approach,
+      alertPeak: this.alert.peakName,
     };
   }
 
   private baseRemarks(): string[] {
     const r: string[] = [];
     const s = this.stats;
-    if (s.spotted === 0) r.push('The operative was at all times indistinguishable from an ordinary gull. The Committee can offer no higher praise.');
+    if (this.outcome === 'compromised') r.push('The operation is recorded as Compromised. The operative is recorded as present, uninjured and unrepentant.');
+    else if (s.spotted === 0 && s.questions === 0) r.push('The operative was at all times indistinguishable from an ordinary gull. The Committee can offer no higher praise.');
+    else if (s.spotted === 0) r.push('The operative was never identified, though a gull was thought of, once or twice, in a tone the Committee does not care for.');
     else if (s.spotted >= 3) r.push(`The operative was observed on ${s.spotted} occasions. The Committee reminds all ranks that the ‘S’ in ‘Section G’ does not stand for ‘Seen’.`);
     const chips = s.food.filter((f) => f.kind === 'chip').length;
     const pasties = s.food.filter((f) => f.kind === 'pasty').length;

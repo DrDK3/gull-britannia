@@ -7,6 +7,13 @@
  * States: ROUTINE → SUSPICIOUS (?) → ALERT (!) → SEARCH at the last-seen spot → RETURN to the routine. Distractions (a
  * poop on his tunic or in his tea) send him away for a while. Loose mission papers are picked up and put back.
  *
+ * Everything he uses to detect the gull is there to be drawn: the cone (`viewRangeNow`, `fovDeg`), the ceiling of his
+ * gaze (`gazeLimitDeg`), the routine with its playhead (`routine`, `routineStep`, `stepTimeLeft`) and the tell he
+ * gives before he turns (`telling`). `watches(p)` asks the same question of any point.
+ *
+ * He also has ears: for the gull's wings (`gullNoise`), and for other people (`hearNoise`: a shout, another man's
+ * whistle, a gull's long call). And a memory: a second hit is no longer weather, and a third is an enemy.
+ *
  * Compass convention: yaw 0 faces north, π/2 east (clockwise from above). DOM-free.
  */
 import type { Gull } from './gull';
@@ -23,7 +30,35 @@ export const ALERT_AT = 100;
 /** Eye height above the ground (m). */
 export const EYE_H = 1.75;
 
-export type GuardAnim = 'idle' | 'sip' | 'outrage' | 'scrub' | 'shoo' | 'look_up' | 'look_around' | 'point' | 'throw' | 'salute' | 'march' | 'read' | 'attention';
+/** The upper limit of a calm man's gaze above the level (degrees). He looks higher when he has a reason to. */
+export const CALM_GAZE_DEG = 30;
+/** What a reason adds: being suspicious or on edge, and craning his neck (the look_up pose). */
+export const WARY_GAZE_DEG = 40;
+/** What the mission's alert level adds to every glance, by level (calm, suspicious, searching, alarmed). */
+export const VIGILANCE_GAZE_DEG = [0, 15, 20, 25];
+/** The lower limit (degrees below the level): his own chin. */
+export const GAZE_FLOOR_DEG = -70;
+/** How far off he hears wings at full flap (m): scaled by the gull's noise. */
+export const FLAP_HEARING = 6;
+/** Noteworthiness below this is odd behaviour, not an offence: it earns a question mark, never an alert, on its own. */
+export const OFFENCE_NOTE = 0.45;
+/** Where suspicion of mere odd behaviour stops. */
+export const ODD_SUSPICION_CAP = 60;
+
+export type GuardAnim = 'idle' | 'sip' | 'outrage' | 'scrub' | 'shoo' | 'look_up' | 'look_around' | 'point' | 'throw' | 'salute' | 'march' | 'read' | 'attention' | 'stretch';
+
+/** A sound a person makes that others may hear. */
+export type NoiseKind = 'shout' | 'whistle' | 'call' | 'clatter';
+
+/**
+ * How loud the gull is, 0 (gliding, standing) to 1 (flapping hard). The flight model may publish `noise`; until it
+ * does, a flapping gull is 1 and a gliding one 0.
+ */
+export function gullNoise(g: Gull): number {
+  const n = (g as { noise?: unknown }).noise;
+  if (typeof n === 'number' && Number.isFinite(n)) return clamp(n, 0, 1);
+  return g.flapping ? 1 : 0;
+}
 
 export interface RoutineStep {
   e: number;
@@ -32,6 +67,12 @@ export interface RoutineStep {
   wait?: number;
   anim?: GuardAnim;
   say?: string;
+  /** A short name for the routine readout ("post", "river wall"). */
+  label?: string;
+  /** He keeps an eye on what he guards for the whole of this step, walking to it included. */
+  watch?: boolean;
+  /** A tell, `before` seconds ahead of leaving this step: a line and a movement the player can learn to read. */
+  tell?: { before: number; say?: string; anim?: GuardAnim };
 }
 
 export interface DistractionStep {
@@ -45,6 +86,8 @@ export interface DistractionStep {
   say?: string;
   /** Busy: he barely notices anything (scrubbing, queueing for tea). */
   busy?: boolean;
+  /** Called when this step is done (the mission's script: he has covered the papers). */
+  then?: () => void;
 }
 
 export interface GuardHost {
@@ -60,6 +103,8 @@ export interface GuardHost {
   onGuardState(g: Guard, prev: GuardStateId, now: GuardStateId): void;
   onTheftDiscovered(g: Guard): void;
   onItemRecovered(g: Guard): void;
+  /** His `n`th deliberate hit (1, 2, 3…), of `kind` ('uniform' or 'tea'). */
+  onGuardHit(g: Guard, n: number, kind: string): void;
   knockGull(from: V3, dir: V3, strength: number): void;
   spawnThrown(g: Guard, from: V3): void;
   sound(name: string, at?: V3, gain?: number): void;
@@ -73,9 +118,14 @@ const LINES: Record<string, string[]> = {
   lost: ['…Gone.', 'It has the cunning of the bourgeoisie.'],
   theft: ['The dispatch! It’s GONE!', 'Who took the papers?!'],
   recover: ['What is this doing on the ground?', 'Papers do not walk.'],
+  again: ['Again? AGAIN? Is there one gull in Devon?', 'Twice. Twice is not weather.'],
+  purpose: ['I am writing to my mother. I am telling her everything.', 'I see you. I see ALL of you.'],
+  noise: ['What now?', 'Who is shouting?', 'Hm? What was that?'],
+  whistle: ['Where? Where is it?', 'A gull? Which gull?'],
+  call: ['Noisy bird.', 'Gulls. Always something to say.'],
 };
 
-export type GuardStyle = 'soldier' | 'officer' | 'cook' | 'sailor';
+export type GuardStyle = 'soldier' | 'officer' | 'cook' | 'sailor' | 'civilian';
 
 export class Guard {
   name: string;
@@ -91,6 +141,20 @@ export class Guard {
   canThrow = true;
   lines: Record<string, string[]> = { ...LINES };
   distractions: Record<string, DistractionStep[]> = {};
+  /** What to call him in a phrase: "under the nose of the sentry". */
+  label = 'the sentry';
+  /** Not a soldier (a baker): she minds her own goods, shouts rather than whistles, and is nobody's sentry. */
+  civilian = false;
+  /** Off duty: he is there, but he is not looking for anything (the corporal with his tea, until he is called). */
+  offDuty = false;
+  /** The mission's alert level as he feels it (0 calm … 3 alarmed): he looks higher, and checks the sky. */
+  vigilance = 0;
+  /** Deliberate hits he has taken. */
+  hitsTaken = 0;
+  /** The tell he is giving now (the line, or '…' for a movement alone), until he leaves the step. */
+  telling: string | undefined;
+  /** How strongly he is taking the gull in this step: 0 (not at all) to 1 (an alert within the second). */
+  noticeStrength = 0;
 
   state: GuardStateId = GuardState.Routine;
   suspicion = 0;
@@ -139,6 +203,10 @@ export class Guard {
   private checkTimer = 0;
   private priming = 1;
   private decayHold = 0;
+  private told = false;
+  private readonly usedDistractions = new Set<string>();
+  private glanceAt: V3 = v3();
+  private glanceTimer = 0;
 
   constructor(
     readonly id: string,
@@ -193,20 +261,74 @@ export class Guard {
     if (arr?.length) this.say(this.rng.pick(arr));
   }
 
-  /** A poop hit this guard ("uniform") or his tea ("tea"). */
-  onPooped(kind: string): void {
-    if (this.state === GuardState.Alert || (this.suspicion >= 50 && this.noticing)) {
-      this.suspicion = ALERT_AT;
-      this.lastSeen = { ...this.host.gull.pos };
-      this.say('You did that on PURPOSE!');
-      this.enter(GuardState.Alert);
+  /**
+   * A poop hit this guard ("uniform") or his tea ("tea"). The first of each kind is bad luck and sends him off to put
+   * it right. A second hit of the same kind is a question; a third hit of any kind is an answer: he knows it is on
+   * purpose, wherever the gull is. Drops from the flock (`deliberate` false) are weather.
+   */
+  onPooped(kind: string, deliberate = true): void {
+    if (!deliberate) {
+      if (this.state === GuardState.Alert || this.state === GuardState.Distracted) return;
+      if (this.distractions[kind]) this.startDistraction(kind);
+      else {
+        this.say('Disgusting bird!');
+        this.suspicion = Math.max(this.suspicion, 30);
+      }
       return;
     }
-    if (this.distractions[kind]) this.startDistraction(kind);
-    else {
+    const n = ++this.hitsTaken;
+    this.host.onGuardHit(this, n, kind);
+    if (this.state === GuardState.Alert || (this.suspicion >= 50 && this.noticing) || n >= 3) {
+      const known = this.lines['purpose'] ?? [];
+      this.suspicion = ALERT_AT;
+      this.lastSeen = { ...this.host.gull.pos };
+      this.enter(GuardState.Alert);
+      this.say(n >= 3 && known.length ? known[Math.min(n - 3, known.length - 1)]! : 'You did that on PURPOSE!', 3.4);
+      return;
+    }
+    if (this.distractions[kind] && !this.usedDistractions.has(kind)) {
+      this.usedDistractions.add(kind);
+      this.startDistraction(kind);
+      return;
+    }
+    if (n === 1) {
       this.say('Disgusting bird!');
       this.suspicion = Math.max(this.suspicion, 30);
+      return;
     }
+    // Again: he stops what he is doing and looks for where it came from.
+    this.suspicion = Math.max(this.suspicion, 60);
+    this.lastSeen = { ...this.host.gull.pos };
+    if (this.state !== GuardState.Suspicious && this.state !== GuardState.Investigate && this.state !== GuardState.Search) this.enter(GuardState.Suspicious);
+    this.sayLine('again');
+  }
+
+  /**
+   * He hears something that is not the gull's wings: a shout or a clatter (he goes to see), another man's whistle (he
+   * is on edge, and looks), a gull's long call (he glances up at it, and his round waits). Returns whether it reached
+   * him.
+   */
+  hearNoise(at: V3, kind: NoiseKind): boolean {
+    if (this.civilian || this.offDuty || this.state === GuardState.Alert || this.isBusy()) return false;
+    const calm = this.state === GuardState.Routine || this.state === GuardState.Return;
+    if (kind === 'call') {
+      if (!calm) return false;
+      this.glanceAt = { ...at };
+      this.glanceTimer = 2.4;
+      if (this.rng.next() < 0.5) this.sayLine('call');
+      return true;
+    }
+    if (kind === 'whistle') this.alarmTimer = Math.max(this.alarmTimer, 20);
+    if (!calm && this.state !== GuardState.Distracted) {
+      // Already looking for something: he looks there instead.
+      if (this.state !== GuardState.Recover) this.lastSeen = v3(at.e, at.n, at.h + 2);
+      return true;
+    }
+    this.suspicion = Math.max(this.suspicion, kind === 'whistle' ? 60 : 45);
+    this.lastSeen = v3(at.e, at.n, at.h + 2);
+    this.enter(GuardState.Suspicious);
+    this.sayLine(kind === 'whistle' ? 'whistle' : 'noise');
+    return true;
   }
 
   onNearMiss(splat: V3): void {
@@ -243,6 +365,116 @@ export class Guard {
 
   stepIndex(): number {
     return this.step;
+  }
+
+  // ------------------------------------------------------------------ what he can perceive, to be drawn
+
+  /** The upper limit of his gaze now (degrees above the level): what a ceiling over his cone should show. */
+  get gazeLimitDeg(): number {
+    let up = CALM_GAZE_DEG + (this.headPitch * 180) / Math.PI + (VIGILANCE_GAZE_DEG[this.vigilance] ?? 0);
+    const s = this.state;
+    if (s === GuardState.Alert || s === GuardState.Search || s === GuardState.Investigate || s === GuardState.Suspicious || this.alarmTimer > 0) up += WARY_GAZE_DEG;
+    if (this.anim === 'look_up') up += WARY_GAZE_DEG;
+    return Math.min(up, 90);
+  }
+
+  /** How far he sees now (m): further when on edge. */
+  get viewRangeNow(): number {
+    return this.viewRange * (this.alarmTimer > 0 ? 1.25 : 1);
+  }
+
+  /** His cone now: range (m), width (degrees, whole angle), the compass yaw it points along and its ceiling. */
+  get cone(): { range: number; fovDeg: number; yaw: number; gazeLimitDeg: number; gazeFloorDeg: number } {
+    return { range: this.viewRangeNow, fovDeg: this.fovDeg, yaw: this.facingYaw(), gazeLimitDeg: this.gazeLimitDeg, gazeFloorDeg: GAZE_FLOOR_DEG };
+  }
+
+  /** How far off he would hear the gull now (m): its wings, or anything that moves right beside him. */
+  hearingRadius(g: Gull = this.host.gull): number {
+    const noise = gullNoise(g);
+    const beside = g.speed() > 0.6 || noise > 0 ? this.hearing : 0;
+    if (this.isBusy() || this.offDuty) return beside;
+    return Math.max(beside, FLAP_HEARING * noise);
+  }
+
+  /** The step of his routine he is on (walking to it, or at it), or −1 when something has taken him off it. */
+  get routineStep(): number {
+    return (this.state === GuardState.Routine || this.state === GuardState.Return) && this.routine.length ? this.step : -1;
+  }
+
+  /** Whether he has reached the step he is on. */
+  get atStep(): boolean {
+    return this.state === GuardState.Routine && this.arrived;
+  }
+
+  /** Seconds until he leaves the step he is on: the walk to it, if he is not there yet, and the wait. 0 off the routine. */
+  get stepTimeLeft(): number {
+    if (this.routineStep < 0) return 0;
+    return this.timeLeftIn(this.step, true);
+  }
+
+  private timeLeftIn(i: number, current: boolean): number {
+    const st = this.routine[i];
+    if (!st) return 0;
+    const wait = st.wait ?? 3;
+    if (current && this.arrived && this.state === GuardState.Routine) return Math.max(wait - this.stepTimer, 0);
+    const from = current ? this.pos : this.routine[(i + this.routine.length - 1) % this.routine.length]!;
+    return Math.hypot(st.e - from.e, st.n - from.n) / this.walkSpeed + wait;
+  }
+
+  /** Whether the step he is on is one where he keeps an eye on what he guards. */
+  get watchingNow(): boolean {
+    return this.routineStep >= 0 && !!this.routine[this.step]!.watch;
+  }
+
+  /**
+   * Seconds until his routine next changes between watching what he guards and not: with `watchingNow`, the clock a
+   * player waits on. 0 off the routine, or if the routine never changes.
+   */
+  get windowTimeLeft(): number {
+    if (this.routineStep < 0) return 0;
+    const now = !!this.routine[this.step]!.watch;
+    let t = this.timeLeftIn(this.step, true);
+    for (let k = 1; k < this.routine.length; k++) {
+      const i = (this.step + k) % this.routine.length;
+      if (!!this.routine[i]!.watch !== now) return t;
+      t += this.timeLeftIn(i, false);
+    }
+    return 0;
+  }
+
+  /** The routine as short names, one per step, for the readout. */
+  routineLabels(): string[] {
+    return this.routine.map((st, i) => st.label ?? `step ${i + 1}`);
+  }
+
+  /** Give him a new routine: he walks to its first step from wherever he is. */
+  setRoutine(steps: RoutineStep[], text?: string): void {
+    this.routine = steps;
+    this.routineText = text ?? this.routineLabels().join(' · ');
+    this.step = 0;
+    this.stepTimer = 0;
+    this.arrived = false;
+    this.told = false;
+    this.telling = undefined;
+    if (this.state === GuardState.Routine) this.enter(GuardState.Return);
+  }
+
+  /** Would he see a thing at `p` now: in range, inside the cone and under the ceiling of his gaze, with a clear line? */
+  watches(p: V3): boolean {
+    if (this.offDuty || this.isBusy()) return false;
+    const eye = this.headPosition();
+    return this.inCone(eye, p) && this.host.lineOfSight(eye, p);
+  }
+
+  private inCone(eye: V3, p: V3): boolean {
+    const de = p.e - eye.e;
+    const dn = p.n - eye.n;
+    const dh = p.h - eye.h;
+    const flat = Math.hypot(de, dn);
+    if (Math.hypot(flat, dh) >= this.viewRangeNow) return false;
+    const hang = flat > 0.05 ? (Math.abs(wrap(Math.atan2(de, dn) - this.facingYaw())) * 180) / Math.PI : 0;
+    const vang = (Math.atan2(dh, Math.max(flat, 0.01)) * 180) / Math.PI;
+    return hang < this.fovDeg * 0.5 && vang < this.gazeLimitDeg && vang > GAZE_FLOOR_DEG;
   }
 
   /** Force the routine to a step (tests and mission scripting). */
@@ -351,38 +583,30 @@ export class Guard {
     const g = this.host.gull;
     this.seesGull = false;
     this.noticing = false;
+    this.noticeStrength = 0;
     const eye = this.headPosition();
     const gp = g.eye();
-    const to = v3(gp.e - eye.e, gp.n - eye.n, gp.h - eye.h);
-    const d = Math.hypot(to.e, to.n, to.h);
-    const busy = this.isBusy();
+    const d = dist(eye, gp);
+    const busy = this.isBusy() || this.offDuty;
+    const noise = gullNoise(g);
     let senses = false;
-    if (d < this.hearing && (g.speed() > 0.6 || g.flapping)) senses = true;
-    else if (g.flapping && d < 6 && !busy) senses = true;
-    else if (!busy) {
-      const range = this.viewRange * (this.alarmTimer > 0 ? 1.25 : 1);
-      if (d < range) {
-        const flat = Math.hypot(to.e, to.n);
-        const hang = flat > 0.05 ? (Math.abs(wrap(Math.atan2(to.e, to.n) - this.facingYaw())) * 180) / Math.PI : 0;
-        const vang = (Math.atan2(to.h, Math.max(flat, 0.01)) * 180) / Math.PI;
-        let upLim = 30 + (this.headPitch * 180) / Math.PI;
-        const s = this.state;
-        if (s === GuardState.Alert || s === GuardState.Search || s === GuardState.Investigate || s === GuardState.Suspicious || this.alarmTimer > 0) upLim += 40;
-        if (this.anim === 'look_up') upLim += 40;
-        if (hang < this.fovDeg * 0.5 && vang < upLim && vang > -70) senses = this.host.lineOfSight(eye, gp);
-      }
-    }
+    if (d < this.hearing && (g.speed() > 0.6 || noise > 0)) senses = true;
+    else if (noise > 0 && d < FLAP_HEARING * noise && !busy) senses = true;
+    else if (!busy && this.inCone(eye, gp)) senses = this.host.lineOfSight(eye, gp);
     this.seesGull = senses;
     if (!senses) return;
     let note = this.host.noteworthiness(this, d);
-    if (this.alarmTimer > 0 && d < 18) note = Math.max(note, 0.45);
+    if (this.alarmTimer > 0 && d < 18 && !this.civilian) note = Math.max(note, 0.45);
     if (note <= 0) return;
     this.noticing = true;
     this.lastSeen = { ...g.pos };
     const t = lerp(0.75, 3.4, clamp(d / this.viewRange, 0, 1));
     let gain = ((note * 100) / t) * this.priming;
     if (busy) gain *= 0.3;
-    this.suspicion = Math.min(this.suspicion + gain * dt, ALERT_AT);
+    // Odd behaviour makes him wonder; only an offence makes him sure.
+    const cap = note < OFFENCE_NOTE ? ODD_SUSPICION_CAP : ALERT_AT;
+    if (this.suspicion < cap) this.suspicion = Math.min(this.suspicion + gain * dt, cap);
+    this.noticeStrength = clamp(gain / 100, 0.05, 1);
     this.decayHold = 1.2;
   }
 
@@ -425,6 +649,15 @@ export class Guard {
 
   private doRoutine(dt: number): void {
     this.decay(dt, 12);
+    // A gull called: he looks up at it, and his round waits.
+    if (this.glanceTimer > 0) {
+      this.glanceTimer -= dt;
+      this.faceToward(this.glanceAt, dt, 5);
+      this.lookAtPoint(this.glanceAt, dt);
+      this.anim = 'look_up';
+      this.mugInHand = false;
+      return;
+    }
     if (!this.routine.length) return;
     const st = this.routine[this.step]!;
     if (!this.arrived) {
@@ -437,16 +670,37 @@ export class Guard {
     } else {
       this.faceYaw(st.yaw ?? this.bodyYaw, dt);
       this.anim = st.anim ?? 'idle';
-      this.mugInHand = this.anim === 'sip';
       this.stepTimer += dt;
-      if (this.stepTimer >= (st.wait ?? 3)) {
+      const wait = st.wait ?? 3;
+      const left = wait - this.stepTimer;
+      if (st.tell && !this.told && left <= st.tell.before) {
+        this.told = true;
+        this.telling = st.tell.say ?? '…';
+        if (st.tell.say) this.say(st.tell.say, st.tell.before + 0.4);
+        this.host.sound('tell', this.headPosition(), -8);
+      }
+      if (this.told && st.tell?.anim) this.anim = st.tell.anim;
+      // On a raised alert, a man who is watching also checks the sky before he moves on.
+      else if (this.vigilance >= 1 && st.watch && left <= 1.4 && wait >= 2) this.anim = 'look_up';
+      this.mugInHand = this.anim === 'sip';
+      if (this.stepTimer >= wait) {
         this.step = (this.step + 1) % this.routine.length;
         this.arrived = false;
         this.mugInHand = false;
+        this.told = false;
+        this.telling = undefined;
       }
     }
     this.headPitch = lerp(this.headPitch, 0, dt * 3);
-    this.headYaw = lerp(this.headYaw, 0, dt * 3);
+    // On a watching step his head stays on what he guards, whichever way his feet are going.
+    const cur = this.routine[this.step]!;
+    const gi = this.guardedItem;
+    let headWant = 0;
+    if (cur.watch && gi) {
+      const to = gi.home.pos;
+      if (Math.hypot(to.e - this.pos.e, to.n - this.pos.n) > 0.3) headWant = clamp(wrap(Math.atan2(to.e - this.pos.e, to.n - this.pos.n) - this.bodyYaw), -1.3, 1.3);
+    }
+    this.headYaw = lerp(this.headYaw, headWant, Math.min(dt * 6, 1));
   }
 
   private doSuspicious(dt: number): void {
@@ -588,6 +842,7 @@ export class Guard {
         this.distIndex++;
         this.distArrived = false;
         this.mugInHand = false;
+        st.then?.();
       }
     }
   }
@@ -658,6 +913,7 @@ export class Guard {
 
   private checkItems(): void {
     const s = this.state;
+    if (this.civilian || this.offDuty) return;
     if (s === GuardState.Alert || s === GuardState.Recover || s === GuardState.Distracted) return;
     const eye = this.headPosition();
     const half = this.fovDeg * 0.5;
