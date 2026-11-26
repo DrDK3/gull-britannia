@@ -362,6 +362,9 @@ export class Coach {
       return this.make(l.id, text, 'lesson', nudged);
     }
     // The mission's own prompt is about what is in reach right now: it comes before a general reminder.
+    // Papers with a weight on them: the first pull only knocks it off (the base mission would offer a plain snatch).
+    const grab = m.beak ? undefined : m.findGrabbable();
+    if (grab?.covered) return this.make('action', `{interact} Tug the ${grab.name.toLowerCase()}. The first pull only knocks the weight off, and not quietly.`, 'action', false);
     const own = tokenise(m.prompt());
     if (own) return this.make('action', own, 'action', false);
     if (this.reminder) return this.make(this.reminder.id, this.reminder.text, 'reminder', false);

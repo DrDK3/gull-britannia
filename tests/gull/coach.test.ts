@@ -172,6 +172,22 @@ describe('the coach', () => {
     expect(own.text).not.toMatch(/\[/);
   });
 
+  it('says what a pull at weighted-down papers will do, instead of offering a plain snatch', () => {
+    const m = m1();
+    m.skipTutorial();
+    const p = new Pupil(m);
+    const d = m.dispatch;
+    m.gull.spawn(v3(d.pos.e + 0.9, d.pos.n, d.pos.h - 0.4), -Math.PI / 2);
+    p.hold(0.3);
+    expect(p.coach.prompt()!.text).toMatch(/^\{interact\} Snatch/);
+    d.covered = true;
+    p.hold(0.1);
+    const tug = p.coach.prompt()!;
+    expect(tug.kind).toBe('action');
+    expect(tug.actions).toEqual(['interact']);
+    expect(tug.text).toMatch(/Tug the .*knocks the weight off/);
+  });
+
   it('reminds a floating gull how to get off the water, twice, then trusts it', () => {
     const m = m1();
     m.skipTutorial();

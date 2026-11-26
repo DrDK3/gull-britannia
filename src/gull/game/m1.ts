@@ -121,7 +121,7 @@ export class Mission1 extends Mission {
     this.addPerch('church', v3(M1.churchRoof.e, M1.churchRoof.n, this.top(M1.churchRoof)), 'St Saviour’s roof', 'The old town at a glance.');
     this.gutterPerch = this.addPerch('gutter', v3(M1.customGutter.e, M1.customGutter.n, this.top(M1.customGutter)), 'Custom House gutter', 'Right above the dispatch. A calm sentry never looks this high.');
     this.addPerch('chimney', this.world.highestNear(M1.customChimney.e, M1.customChimney.n, 1), 'Custom House chimney', 'Watch his routine from here.');
-    this.addPerch('fort', this.world.highestNear(M1.fortParapet.e, M1.fortParapet.n, 1.5), 'Fort parapet', 'The fort end of his patrol.');
+    this.addPerch('fort', this.world.highestNear(M1.fortParapet.e, M1.fortParapet.n, 1.5), 'Fort parapet', 'Out of his way. His round turns back at the bakery corner.');
 
     // The quay lamp: a cast-iron post with a lantern, on the quay's edge.
     const lampBase = this.g(M1.coveLamp);
@@ -344,7 +344,7 @@ export class Mission1 extends Mission {
   protected override onTagged(g: Guard): void {
     if (g === this.sentry) {
       this.completeObjective('scout');
-      this.say('Mother', 'Private Borovsky. Creature of habit: post, tea, river, fort, and round again. Note when his back is turned. Note also: he loves his tea.', 7);
+      this.say('Mother', 'Private Borovsky. A creature of habit. He looks away at the river wall and at the fort side. Note also: he loves his tea.', 7);
     }
   }
 

@@ -306,6 +306,12 @@ body,
   margin: 6px 0 12px;
 }
 
+.gb-approach {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border: 2px solid var(--ink);
+}
+
 .gb-grade-letter {
   font-size: 3rem;
   font-weight: 700;
@@ -622,6 +628,12 @@ body,
   letter-spacing: 0.06em;
 }
 
+.gb-reason {
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--hud-ink);
+}
+
 .gb-readout b {
   font-size: 1.3em;
   font-variant-numeric: tabular-nums;
@@ -631,7 +643,49 @@ body,
   padding: 0.2em 0.6em;
 }
 
-/* Top centre: the stamp. One alert or banner at a time. */
+/* Top centre: the watch (the operation's clock, and the alert ladder while it is raised), then the stamp. */
+.gb-watch {
+  padding: 0.35em 0.9em;
+  text-align: center;
+}
+
+.gb-clock b {
+  font-variant-numeric: tabular-nums;
+}
+
+.gb-urgent {
+  font-weight: 800;
+}
+
+.gb-ladder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gb-rungs {
+  display: flex;
+  gap: 0.2em;
+}
+
+.gb-rungs i {
+  position: relative;
+  width: 1.5em;
+  height: 0.65em;
+  border: 1px solid currentColor;
+}
+
+.gb-rungs b {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: currentColor;
+}
+
+/* The stamp. One alert or banner at a time. */
 .gb-stamp-hud {
   font-size: 1.5em;
   font-weight: 800;
@@ -828,6 +882,7 @@ body,
 
 .gb-routine {
   display: flex;
+  justify-content: center;
   gap: 0.25em;
   margin-top: 0.25em;
 }
@@ -839,6 +894,19 @@ body,
 
 .gb-routine span.on {
   background: var(--hud-ink);
+  color: #14171a;
+  font-weight: 700;
+}
+
+.gb-window {
+  margin-top: 0.2em;
+  font-weight: 700;
+}
+
+.gb-tell {
+  margin-top: 0.2em;
+  padding: 0 0.3em;
+  background: var(--accent);
   color: #14171a;
   font-weight: 700;
 }
@@ -861,13 +929,43 @@ body,
   letter-spacing: 0.08em;
 }
 
-/* The way to the marker when it is out of view: a pointer on a ring inside the clear middle of the screen. */
-.gb-arrow {
+/*
+ * The ring: marks round the middle of the view, a fifth of the screen's height out, inside the clear space between the
+ * fixed boxes. The way to the marker when it is out of view, and whoever is noticing the gull, each at its bearing.
+ */
+.gb-ring {
   position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  z-index: 3;
+}
+
+.gb-mark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.gb-noticer {
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
+  background: var(--plate);
+  border: 2px solid currentColor;
+  font-weight: 900;
+  line-height: 1.45em;
+  text-align: center;
+}
+
+/* He is taking an interest but cannot see the gull now. */
+.gb-noticer.gb-unseen {
+  border-style: dashed;
+}
+
+.gb-arrow {
   width: 26px;
   height: 26px;
-  margin: -13px 0 0 -13px;
-  z-index: 3;
 }
 
 .gb-arrow i {

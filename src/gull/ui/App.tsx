@@ -296,12 +296,14 @@ function ResultsCard({ game, st }: { game: GullGame; st: GameState }) {
   const r = st.results;
   if (!r) return null;
   const at = OPERATIONS.findIndex((o) => o.id === r.missionId);
-  const next = at >= 0 ? OPERATIONS.slice(at + 1).find((o) => o.playable) : undefined;
+  // A compromised operation is not done: it opens no further file, and the first thing offered is another go.
+  const lost = r.outcome === 'compromised';
+  const next = !lost && at >= 0 ? OPERATIONS.slice(at + 1).find((o) => o.playable) : undefined;
   return (
-    <Card label={`Performance review: ${r.title}`} className="gb-dossier gb-results gb-sheet" onClose={() => game.toTitle()}>
+    <Card label={`${lost ? 'Compromised' : 'Performance review'}: ${r.title}`} className="gb-dossier gb-results gb-sheet" onClose={() => game.toTitle()}>
       {/* The body scrolls and holds no control of its own: it takes the focus so that the keyboard can scroll it. */}
       <div className="gb-sheet-body" tabIndex={0} role="group" aria-label="The review">
-        <div className="gb-stamp">Performance review</div>
+        <div className="gb-stamp">{lost ? 'Compromised' : 'Performance review'}</div>
         <h2>{r.title}</h2>
         <div className="gb-grade">
           <span className="gb-grade-letter">{r.grade}</span>
@@ -309,10 +311,16 @@ function ResultsCard({ game, st }: { game: GullGame; st: GameState }) {
             {r.gradeTitle}
             <br />
             <span className="gb-fine">
-              {r.total} points · {fmtTime(r.time)}
+              {r.total} points · {fmtTime(r.time)} · highest alert: {r.alertPeak}
             </span>
           </span>
         </div>
+        {lost && <p className="gb-approach">The operation was lost. The operative was not. Nothing is filed, and the dispatch will be on that table again tomorrow.</p>}
+        {!lost && r.approach && (
+          <p className="gb-approach" data-approach={r.approach.id}>
+            <b>Approach: {r.approach.title}.</b> {r.approach.citation}.
+          </p>
+        )}
         <table>
           <tbody>
             {r.lines.map(([label, pts], i) => (
@@ -335,19 +343,28 @@ function ResultsCard({ game, st }: { game: GullGame; st: GameState }) {
         ))}
         {r.debrief && <p className="gb-debrief">{r.debrief}</p>}
       </div>
-      <div className="gb-actions gb-sheet-foot">
-        {next ? (
-          <button className="gb-primary" data-autofocus onClick={() => game.showBriefing(next.id)}>
-            Proceed to File {OPERATIONS.indexOf(next) + 1}: {next.title}
+      {lost ? (
+        <div className="gb-actions gb-sheet-foot">
+          <button className="gb-primary" data-autofocus onClick={() => game.restart()}>
+            Try again
           </button>
-        ) : (
-          <button className="gb-primary" data-autofocus onClick={() => game.toTitle()}>
-            Back to the files
-          </button>
-        )}
-        <button onClick={() => game.restart()}>Try again</button>
-        {next && <button onClick={() => game.toTitle()}>Title screen</button>}
-      </div>
+          <button onClick={() => game.toTitle()}>Back to the files</button>
+        </div>
+      ) : (
+        <div className="gb-actions gb-sheet-foot">
+          {next ? (
+            <button className="gb-primary" data-autofocus onClick={() => game.showBriefing(next.id)}>
+              Proceed to File {OPERATIONS.indexOf(next) + 1}: {next.title}
+            </button>
+          ) : (
+            <button className="gb-primary" data-autofocus onClick={() => game.toTitle()}>
+              Back to the files
+            </button>
+          )}
+          <button onClick={() => game.restart()}>Try again</button>
+          {next && <button onClick={() => game.toTitle()}>Title screen</button>}
+        </div>
+      )}
     </Card>
   );
 }

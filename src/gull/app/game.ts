@@ -84,7 +84,20 @@ export interface HudState {
   distance?: number;
   /** The marker's direction when it is off screen (rad, 0 = up, clockwise). */
   offscreen?: number;
+  /** "Just a gull": how the gull looks to whoever thinks worst of it. The level in words, the main reason, 0 to 1. */
+  conspicuous: { level: string; reason: string; value: number };
+  /** The garrison's alert ladder: the rung (0 calm to 3 alarmed), its name, and how far up that rung (0 to 1). */
+  alert: { level: number; name: string; progress: number };
+  /** The clock from the fiction, while it runs: "Courier back", "13.30", and the seconds left. */
+  deadline?: { label: string; clock: string; left: number };
+  /**
+   * Who is taking an interest: where each is from the way the gull looks (rad; 0 ahead, positive to the right) and how
+   * strongly (0 to 1). Strongest first; people in nearly the same direction are shown as one.
+   */
+  noticers: { id: string; rel: number; strength: number; sees: boolean; alert: boolean }[];
 }
+
+const NO_STEALTH = { conspicuous: { level: 'just a gull', reason: 'just a gull', value: 0 }, alert: { level: 0, name: 'calm', progress: 0 }, noticers: [] } as const;
 
 export interface GuardOverlay {
   id: string;
@@ -92,6 +105,13 @@ export interface GuardOverlay {
   /** A tagged guard's routine, step by step, and which step he is on (−1 when off his routine). */
   routine?: string[];
   routineStep?: number;
+  /** Seconds until he leaves that step. */
+  stepLeft?: number;
+  /** For a guard who minds something: whether his routine has him watching it now, and for how many seconds more. */
+  watching?: boolean;
+  windowLeft?: number;
+  /** The tell he gives just before he turns back. */
+  telling?: string;
   state: string;
   /** 0…1 */
   suspicion: number;
@@ -234,7 +254,7 @@ export class GullGame {
       debug: this.flags.debug,
       camera: 'chase',
       cameraLabel: CAMERA_LABEL.chase,
-      hud: { speedKmh: 0, height: 0, altitude: 0, mode: '', payload: 3, maxPayload: 3, heading: 0 },
+      hud: { speedKmh: 0, height: 0, altitude: 0, mode: '', payload: 3, maxPayload: 3, heading: 0, ...NO_STEALTH, noticers: [] },
       settings: this.settings,
       fps: 0,
       objectives: [],
@@ -535,10 +555,13 @@ export class GullGame {
 
   private onFinished(r: Results): void {
     const saved: Progress = { done: [...this.st.saved.done], best: { ...this.st.saved.best } };
-    if (!saved.done.includes(r.missionId)) saved.done.push(r.missionId);
-    const best = saved.best[r.missionId];
-    if (!best || r.total > best.total) saved.best[r.missionId] = { total: r.total, grade: r.grade };
-    saveProgress(saved);
+    // A compromised operation is not done: it is not filed, cannot be the best run, and opens nothing.
+    if (r.outcome !== 'compromised') {
+      if (!saved.done.includes(r.missionId)) saved.done.push(r.missionId);
+      const best = saved.best[r.missionId];
+      if (!best || r.total > best.total) saved.best[r.missionId] = { total: r.total, grade: r.grade };
+      saveProgress(saved);
+    }
     this.wantCapture = false;
     if (document.pointerLockElement) document.exitPointerLock();
     this.audio.music('results');
@@ -904,8 +927,10 @@ export class GullGame {
     const batch = m.takeEvents();
     if (batch.length) {
       this.messages.now = m.elapsed;
-      // A radio line that comes with an alert (spotted, the papers dropped) is urgent: it is said at once.
-      const urgent = batch.some((e) => (e.type === 'banner' && (e.tone === 'bad' || e.tone === 'warn')) || (e.type === 'toast' && e.tone === 'bad'));
+      // A radio line is urgent, and said at once, when it comes with an alert (spotted, the ladder rising, the papers
+      // dropped), or in the last two minutes of the mission's clock (the courier has asked for his bill).
+      const left = m.deadlineLeft;
+      const urgent = (left !== undefined && left < 125 && !m.completed) || batch.some((e) => (e.type === 'banner' && (e.tone === 'bad' || e.tone === 'warn')) || (e.type === 'toast' && e.tone === 'bad'));
       for (const e of batch) this.onMissionEvent(e, urgent);
     }
     this.noteObjectives(m);
@@ -1139,14 +1164,19 @@ export class GullGame {
       if (d > 90) continue;
       const st = gd.state;
       const icon = st === GuardState.Alert ? '!' : st === GuardState.Suspicious || st === GuardState.Investigate || st === GuardState.Search ? '?' : st === GuardState.Distracted ? '…' : '';
-      const steps = gd.tagged && gd.routineText ? gd.routineText.split(' · ') : undefined;
+      const onRound = gd.tagged && gd.routine.length > 1;
+      const minds = onRound && gd.routine.some((s) => s.watch);
       const tag = g.scouting && !gd.tagged ? m.tagProgressOf(gd) : undefined;
       if (!gd.tagged && !icon && !gd.speech && !(tag && tag > 0)) continue;
       near.push({
         id: gd.id,
         name: gd.tagged ? gd.name : undefined,
-        routine: steps,
-        routineStep: steps && (st === GuardState.Routine || st === GuardState.Return) && steps.length === gd.routine.length ? gd.stepIndex() : -1,
+        routine: onRound ? gd.routineLabels() : undefined,
+        routineStep: onRound ? gd.routineStep : -1,
+        stepLeft: onRound ? gd.stepTimeLeft : undefined,
+        watching: minds && gd.routineStep >= 0 ? gd.watchingNow : undefined,
+        windowLeft: minds && gd.routineStep >= 0 ? gd.windowTimeLeft : undefined,
+        telling: gd.tagged ? gd.telling : undefined,
         state: gd.stateName,
         suspicion: gd.suspicion / 100,
         icon,
@@ -1165,6 +1195,14 @@ export class GullGame {
       if (o.name || o.icon || o.speech || (o.tag !== undefined && o.tag > 0)) overlays.push(o);
     }
     this.anchorOrder = overlays.map((o) => o.id);
+    // Who is taking an interest, strongest first: at most five, and one for each direction.
+    const noticers: HudState['noticers'] = [];
+    for (const n of m.noticing()) {
+      if (noticers.length >= 5) break;
+      if (noticers.some((t) => Math.abs(Math.atan2(Math.sin(t.rel - n.relBearing), Math.cos(t.rel - n.relBearing))) < 0.4)) continue;
+      noticers.push({ id: n.id, rel: n.relBearing, strength: n.strength, sees: n.sees, alert: n.state === 'alert' });
+    }
+    const left = m.deadlineLeft;
     // The one prompt on show is the coach's choice: a lesson, a reminder, or the mission's own prompt.
     this.messages.setPrompt(this.st.gate === 'flying' ? this.coach?.prompt() : undefined);
     this.messages.step(0);
@@ -1182,6 +1220,10 @@ export class GullGame {
         beakIsMission: m.beak?.isMission,
         distance,
         offscreen,
+        conspicuous: { level: m.conspicuousLevel, reason: m.conspicuousReason, value: m.conspicuousness },
+        alert: { level: m.alert.level, name: m.alert.name, progress: m.alert.progress },
+        deadline: m.deadline && left !== undefined && m.running && !m.completed ? { label: m.deadline.label, clock: m.deadline.clock, left } : undefined,
+        noticers,
       },
       objectives: m.objectives.filter((o) => o.state !== 'hidden').map((o) => ({ id: o.id, text: tokenise(o.text), state: o.state, optional: o.optional })),
       score: m.liveScore(),

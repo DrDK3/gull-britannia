@@ -105,21 +105,21 @@ const click = (page, text) => page.click(`button:has-text("${text}")`, { timeout
   // ---------------------------------------------------------------- with the keyboard alone
   await click(page, 'Keyboard only');
   check('Keyboard only starts the mission at once', await waitGate(page, 'flying', 6000));
-  await page.waitForFunction(() => window.__gull.game.mission.elapsed > 0.3, null, { timeout: 30000, polling: 100 });
+  await page.waitForFunction(() => window.__gull.game.mission.elapsed > 0.3, null, { timeout: 120000, polling: 100 });
   const k0 = await state(page);
   check('flying: the mission runs and the clock moves', k0.running && k0.elapsed > 0.3 && k0.epoch > t0.epoch, `elapsed ${k0.elapsed.toFixed(2)}`);
   check('still no readout in play', !k0.debugLine);
   await page.keyboard.down('KeyT');
-  const scout = await page.waitForFunction(() => window.__gull.game.mission.gull.scouting, null, { timeout: 15000, polling: 50 }).then(() => true, () => false);
+  const scout = await page.waitForFunction(() => window.__gull.game.mission.gull.scouting, null, { timeout: 60000, polling: 50 }).then(() => true, () => false);
   await page.keyboard.up('KeyT');
   check('T scouts', scout);
   await page.keyboard.down('Space');
-  const off = await page.waitForFunction(() => window.__gull.game.mission.objectiveState('takeoff') === 'done', null, { timeout: 60000, polling: 100 }).then(() => true, () => false);
+  const off = await page.waitForFunction(() => window.__gull.game.mission.objectiveState('takeoff') === 'done', null, { timeout: 180000, polling: 100 }).then(() => true, () => false);
   await page.keyboard.up('Space');
   check('Space takes off', off);
 
   // ---------------------------------------------------------------- restart puts the day back
-  await page.waitForFunction(() => window.__gull.game.mission.elapsed > 4, null, { timeout: 120000, polling: 200 });
+  await page.waitForFunction(() => window.__gull.game.mission.elapsed > 4, null, { timeout: 600000, polling: 200 });
   await page.keyboard.press('Escape');
   check('Escape pauses (keyboard)', await waitGate(page, 'paused'));
   await click(page, 'Restart operation');

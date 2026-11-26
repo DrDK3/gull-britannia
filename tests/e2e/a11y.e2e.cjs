@@ -63,10 +63,31 @@ const { check, finish } = tally();
   await scan('pause: confirm restart');
   await clickNow(page, 'Cancel');
 
-  // The review: the operation is finished for the test (its own flying is the missions suite's business).
+  // The reviews: the operation is ended for the test (its own flying is the missions suite's business). First lost,
+  // then, after "Try again", won.
+  const review = () =>
+    page.evaluate(() => {
+      const g = window.__gull.game;
+      const buttons = [...document.querySelectorAll('.gb-results .gb-sheet-foot button')].map((b) => b.textContent.trim());
+      return { screen: g.state.screen, outcome: g.state.results?.outcome, buttons, focus: document.activeElement?.textContent?.trim() ?? '', done: g.state.saved.done, best: Object.keys(g.state.saved.best), stamp: document.querySelector('.gb-results .gb-stamp')?.textContent ?? '', approach: document.querySelector('.gb-approach')?.textContent ?? '', stored: localStorage.getItem('gull-britannia.progress') };
+    });
   await page.evaluate(() => {
     const g = window.__gull.game;
     g.resume();
+    g.frozen = true;
+    g.mission.compromise(0.2);
+    for (let i = 0; i < 600 && g.state.screen !== 'results'; i++) g.step(1 / 60);
+  });
+  check('the Compromised review comes up', await waitScreen(page, 'results', 15000));
+  await shown('.gb-results');
+  let rv = await review();
+  check('compromised: the review says so, and offers another go first', rv.outcome === 'compromised' && rv.stamp === 'Compromised' && rv.buttons[0] === 'Try again' && rv.focus === 'Try again', `${rv.stamp}: ${rv.buttons.join(' / ')}`);
+  check('compromised: it is not filed as done, is not a best run, and opens no further file', rv.done.length === 0 && rv.best.length === 0 && !rv.buttons.some((b) => /File 2/.test(b)) && !/m1/.test(rv.stored ?? ''), `done ${JSON.stringify(rv.done)}, stored ${rv.stored}`);
+  await scan('review, compromised');
+  await clickNow(page, 'Try again');
+  await waitGate(page, 'flying');
+  await page.evaluate(() => {
+    const g = window.__gull.game;
     g.frozen = true;
     const m = g.mission;
     m.skipTutorial();
@@ -75,6 +96,9 @@ const { check, finish } = tally();
     for (let i = 0; i < 600 && g.state.screen !== 'results'; i++) g.step(1 / 60);
   });
   check('the review comes up', await waitScreen(page, 'results', 15000));
+  await shown('.gb-approach');
+  rv = await review();
+  check('complete: the review names the approach, files the operation and offers File 2', rv.outcome === 'complete' && /Approach: Ghost/.test(rv.approach) && rv.done.includes('m1') && /Proceed to File 2/.test(rv.buttons[0] ?? ''), `${rv.approach} | ${rv.buttons.join(' / ')}`);
   await scan('review');
 
   check('no page errors', errors.length === 0, errors.join(' | ').slice(0, 300));

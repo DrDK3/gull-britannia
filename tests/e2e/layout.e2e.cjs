@@ -42,6 +42,9 @@ function stage() {
   // Perched there, so that the coach has something to say (its "closer look" lesson).
   m.gull.perch = m.gutterPerch;
   m.sentry.tagged = true;
+  // The garrison is searching, and the courier is due in under a minute.
+  m.raiseAlert('script', 55);
+  m.deadline.at = m.elapsed + 50;
   for (let i = 0; i < 30; i++) g.step(1 / 60);
   m.toast('Snatched: The clerk’s chips', 'food');
   m.toast('+10 FOOD — Chip eaten', 'food');
@@ -50,6 +53,12 @@ function stage() {
   // The longest line the rules allow: 140 characters.
   m.say('Mother', 'Private Borovsky. Creature of habit: post, tea, river, fort, and round again. Note when his back is turned. Note also: he loves his tea. Do.');
   for (let i = 0; i < 3; i++) g.step(1 / 60);
+  // Two men taking an interest, one of them sure, on the ring; and the sentry giving his tell, on his label.
+  m.sentry.telling = 'Hm. The table.';
+  m.noticers = [
+    { id: 'borovsky', name: 'Pte. Borovsky', bearing: 0, relBearing: 0.5, distance: 14, strength: 1, sees: true, noticing: true, state: 'alert', civilian: false },
+    { id: 'dunayev', name: 'Cpl. Dunayev', bearing: 0, relBearing: -2.5, distance: 30, strength: 0.5, sees: false, noticing: true, state: 'suspicious', civilian: false },
+  ];
   return true;
 }
 
@@ -135,14 +144,22 @@ function measure() {
 
     // ---------------------------------------------------------------- g. the busiest state
     await page.evaluate(stage);
-    const placed = await waitFor(page, () => getComputedStyle(document.querySelector('[data-label="borovsky"]') ?? document.body).visibility === 'visible' && !!document.querySelector('[data-label="borovsky"]'), null, 180000);
+    const placed = await waitFor(page, () => getComputedStyle(document.querySelector('[data-label="borovsky"]') ?? document.body).visibility === 'visible' && !!document.querySelector('[data-label="borovsky"]') && document.querySelectorAll('[data-hud="noticer"]').length === 2, null, 180000);
     await drawn(page, 2);
     const m = await page.evaluate(measure);
     const names = m.boxes.map((b) => b.name);
-    const want = ['status', 'orders', 'stamp', 'prompt', 'radio', 'label:borovsky'];
+    const want = ['status', 'watch', 'orders', 'stamp', 'prompt', 'radio', 'label:borovsky'];
     const missing = want.filter((n) => !names.includes(n));
     const toasts = names.filter((n) => n === 'toast').length;
-    check(`g. ${at}: the busiest state is on screen`, placed && missing.length === 0 && toasts === 3, `${names.join(' ')}${missing.length ? ` — missing ${missing.join(' ')}` : ''}`);
+    const noticers = names.filter((n) => n === 'noticer').length;
+    check(`g. ${at}: the busiest state is on screen`, placed && missing.length === 0 && toasts === 3 && noticers === 2, `${names.join(' ')}${missing.length ? ` — missing ${missing.join(' ')}` : ''}`);
+    const seen = await page.evaluate(() => ({
+      watch: document.querySelector('[data-hud="watch"]')?.textContent ?? '',
+      urgent: !!document.querySelector('.gb-clock.gb-urgent'),
+      chip: document.querySelector('.gb-chip')?.textContent ?? '',
+      label: document.querySelector('[data-label="borovsky"]')?.textContent ?? '',
+    }));
+    check(`g. ${at}: the clock, the ladder, the chip and the tell are the ones staged`, /Courier back 13\.30 · 0:\d\d/.test(seen.watch) && seen.urgent && /Alert: searching/i.test(seen.watch) && seen.chip.trim().length > 4 && /About to turn/.test(seen.label), `${seen.watch} | ${seen.chip} | ${seen.label}`);
     const off = m.boxes.filter((b) => b.x < -0.5 || b.y < -0.5 || b.x + b.w > m.width + 0.5 || b.y + b.h > m.height + 0.5);
     check(`g. ${at}: every HUD box is wholly on screen`, off.length === 0, off.map((b) => `${b.name} at ${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.w)}×${Math.round(b.h)}`).join('; '));
     const clashes = [];

@@ -18,7 +18,7 @@ const GAME = 'src/gull/game';
 
 /** Files whose strings must be clean as written. */
 function strictFiles(): string[] {
-  const files = ['m1.ts', 'm2.ts', 'free.ts', 'coach.ts', 'parade.ts', 'guard.ts', 'items.ts', 'operations.ts', 'ambient.ts'].map((f) => `${GAME}/${f}`);
+  const files = ['m1.ts', 'm1watch.ts', 'm2.ts', 'free.ts', 'coach.ts', 'parade.ts', 'guard.ts', 'items.ts', 'operations.ts', 'ambient.ts', 'alert.ts', 'conspicuous.ts', 'scoring.ts'].map((f) => `${GAME}/${f}`);
   files.push('src/gull/app/briefings.ts');
   // The story's own files, when they arrive.
   const story = join(ROOT, GAME, 'story');
@@ -130,7 +130,7 @@ describe('player-facing text', () => {
   it('a radio line is at most 140 characters: about nine seconds of reading in flight', () => {
     const long: string[] = [];
     let lines = 0;
-    for (const f of [`${GAME}/m1.ts`, `${GAME}/m2.ts`, `${GAME}/mission.ts`]) {
+    for (const f of [`${GAME}/m1.ts`, `${GAME}/m1watch.ts`, `${GAME}/m2.ts`, `${GAME}/mission.ts`]) {
       const src = ts.createSourceFile(f, readFileSync(join(ROOT, f), 'utf8'), ts.ScriptTarget.ES2022, true);
       const visit = (node: ts.Node) => {
         if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
