@@ -299,6 +299,20 @@ describe('Ambient gulls, and "just a gull" as a system', () => {
     expect(hopped).toBeGreaterThan(30);
   });
 
+  it('Mission 2 has its gulls too: six to twelve, none of them the Bomber Wing', () => {
+    const m = m2();
+    expect(m.ambient.length).toBeGreaterThanOrEqual(6);
+    expect(m.ambient.length).toBeLessThanOrEqual(12);
+    expect(new Set(m.ambient.map((g) => g.behaviour)).size).toBe(5);
+    run(m, 20);
+    for (const g of m.ambient) {
+      expect(Number.isFinite(g.pos.e + g.pos.n + g.pos.h)).toBe(true);
+      if (g.behaviour === 'loaf') expect(g.pos.h - m.world.cellTop(g.pos.e, g.pos.n)).toBeLessThan(0.6);
+      if (g.behaviour === 'circle' || g.behaviour === 'follow') expect(g.pos.h - m.world.surfaceAt(g.pos.e, g.pos.n).h).toBeGreaterThan(2);
+    }
+    expect(m.allies.length).toBe(4);
+  });
+
   it('the flock is deterministic: the same seed lives the same day', () => {
     const snap = (seed: number) => {
       const m = m1(m1World(), seed);
@@ -554,6 +568,63 @@ describe('The alert ladder', () => {
     expect(m.outcome).toBe('complete');
     expect(m.stats.theftDiscovered).toBe(true);
     expect(m.running).toBe(true);
+  });
+});
+
+describe('People hear each other, and the gull', () => {
+  it('a sentry’s whistle puts the next man on edge', () => {
+    const m = m1();
+    const s = m.sentry;
+    const c = m.watch.corporal;
+    farAway(m);
+    m.raiseAlert('script', 50);
+    run(m, 25, {}, () => c.state === GuardState.Routine);
+    const questions = m.stats.questions;
+    // The sentry is hit for the third time: he knows, and whistles.
+    s.hitsTaken = 2;
+    bomb(m, s);
+    expect(run(m, 2, {}, () => s.state === GuardState.Alert)).toBe(true);
+    expect(m.noises.some((n) => n.kind === 'whistle')).toBe(true);
+    expect(c.state).toBe(GuardState.Suspicious);
+    expect(c.alarmTimer).toBeGreaterThan(15);
+    expect(c.gazeLimitDeg).toBeGreaterThanOrEqual(CALM_GAZE_DEG + WARY_GAZE_DEG);
+    expect(m.stats.questions).toBe(questions + 1);
+  });
+
+  it('a long call turns his head, is answered by the gulls, and costs something', () => {
+    const m = m1();
+    const s = m.sentry;
+    // From the quay lamp, off to his right as he sips his tea with his eyes on the table.
+    s.jumpToStep(1);
+    run(m, 0.5);
+    m.gull.spawn(above(m.lampPerch.pos, 0.33), -Math.PI / 2);
+    run(m, 0.3);
+    expect(s.watches(above(m.dispatch.pos, 0.3))).toBe(true);
+    const before = s.stepTimeLeft;
+    m.press('signal');
+    expect(m.stats.calls).toBe(1);
+    expect(m.noises.some((n) => n.kind === 'call')).toBe(true);
+    expect(m.conspicuousReason).toBe('just a gull');
+    run(m, 0.1);
+    expect(m.conspicuousReason).toBe('making a racket');
+    expect(m.alert.heat).toBe(HEAT.call);
+    // He looks up at the caller, and his round waits while he does: a head turned, for two seconds and a bit.
+    run(m, 1);
+    expect(s.anim).toBe('look_up');
+    expect(s.stepTimeLeft).toBeCloseTo(before, 1);
+    const to = Math.atan2(m.gull.pos.e - s.pos.e, m.gull.pos.n - s.pos.n);
+    expect(Math.abs(Math.atan2(Math.sin(s.bodyYaw - to), Math.cos(s.bodyYaw - to)))).toBeLessThan(0.3);
+    expect(s.watches(above(m.dispatch.pos, 0.3))).toBe(false);
+    // The gulls answer.
+    let answering = 0;
+    run(m, 2, {}, () => {
+      answering = Math.max(answering, m.ambient.filter((g) => g.calling).length);
+      return false;
+    });
+    expect(answering).toBeGreaterThanOrEqual(2);
+    run(m, 3);
+    expect(s.state).toBe(GuardState.Routine);
+    expect(s.anim).not.toBe('look_up');
   });
 });
 

@@ -9,6 +9,7 @@
  *
  * The player flies as Bomber lead: bigger payload, a little heavier to turn.
  */
+import { WakeTrack } from './ambient';
 import { Guard, GuardState } from './guard';
 import type { GullProfile, Perch } from './gull';
 import type { Item } from './items';
@@ -178,6 +179,7 @@ export class Mission2 extends Mission {
     this.addItem('bun', v3(M2.refreshments.e - 0.1, M2.refreshments.n - 0.3, deck + 0.86), 0, 'the refreshment table');
     this.addItem('bun', v3(M2.refreshments.e + 0.15, M2.refreshments.n + 0.2, deck + 0.86), 0, 'the refreshment table');
     this.addItem('crust', v3(-281.5, 331, W.groundAt(-281.5, 331) + 0.02), 0.3);
+    this.addAmbientGulls(deck);
 
     // Officers on the stand.
     this.grushkov = { id: 'grushkov', style: 'officer', pos: v3(M2.grushkov.e, M2.grushkov.n, deck), yaw: WEST, anim: 'attention', headYaw: 0, headPitch: 0, phase: 0, moving: false };
@@ -248,6 +250,32 @@ export class Mission2 extends Mission {
     this.addObjective('document', 'Take the Inspection Order from the lectern', () => this.document.pos, false, 'hidden');
     this.addObjective('deliver', 'Deliver the Order to the lobster pot on the Dorothy May', this.pot.pos, false, 'hidden');
     this.addObjective('bun', 'Optional: liberate a saffron bun from the refreshment table', undefined, true);
+  }
+
+  /**
+   * The Embankment's other gulls on parade day: loafers on the station roof, a squabble on St Saviour's, circlers
+   * over the Boat Float and the river, two begging by the refreshments, two working a boat's wake. (The Bomber Wing
+   * are operatives, and are not among them.)
+   */
+  private addAmbientGulls(deck: number): void {
+    const W = this.world;
+    const f = this.flock;
+    const wl = W.waterLevel;
+    const top = (e: number, n: number) => v3(e, n, W.cellTop(e, n));
+    f.addLoafer(top(M2.stationRoof.e - 2.5, M2.stationRoof.n + 3), 2.6);
+    f.addLoafer(top(M2.stationRoof.e + 1.5, M2.stationRoof.n - 4), 1.2);
+    f.addSquabble(top(M2.spawn.e + 5, M2.spawn.n + 4), 1.1);
+    f.addCircler(v3(M2.dorothy.e, M2.dorothy.n, wl + 27), 15, true);
+    f.addCircler(v3(-252, 300, wl + 30), 18, false);
+    f.addCircler(v3(-258, 345, wl + 24), 12, true);
+    const prom = { e: M2.stand.e + 0.5, n: M2.stand.n - M2.stand.l / 2 - 5 };
+    const walk = (e: number, n: number) => W.groundAt(e, n);
+    f.addBeggar(v3(prom.e, prom.n, deck), 3, walk);
+    f.addBeggar(v3(prom.e, prom.n, deck), 3, walk);
+    const wake = new WakeTrack(v3(-255, 110, wl), v3(-250, 335, wl), 2.2, 0.6);
+    f.addFollower(() => wake);
+    f.addFollower(() => wake);
+    this.director = { tick: (dt) => wake.update(dt, this.world.waterLevel) };
   }
 
   private standSentry(id: string, name: string, at: { e: number; n: number }, yaw1: number, yaw2: number): Guard {
