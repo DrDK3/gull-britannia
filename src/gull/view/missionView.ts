@@ -423,7 +423,8 @@ export class MissionView {
     for (const n of mission.npcs) looks.push(lookFor(n.id, n.style));
     for (const mm of mission.marchers) looks.push(lookFor(mm.id, 'marcher'));
     this.cast = new Cast(looks);
-    this.group.add(this.cast.mesh);
+    // (A mission with nobody in it, free flight, draws no people at all.)
+    if (looks.length) this.group.add(this.cast.mesh);
     let k = 0;
     for (const g of mission.guards) {
       this.figures.set(g, this.cast.figures[k++]!);

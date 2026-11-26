@@ -6,14 +6,14 @@
  *   http://127.0.0.1:5310/studio.html?show=gull&pose=flap&t=0.3&view=side
  *
  * Address parameters:
- *   show   what to draw: see SUBJECTS in subjects.ts (gull, gull:carry, flock, viewbill)
+ *   show   what to draw: see SUBJECTS in subjects.ts (gull, gull:carry, flock, viewbill, person:<who>, cast, cast:action)
  *   pose   its pose or animation (gull: glide, flap, bank, brake, dive, tumble, stand, walk, look, shuffle, preen,
- *          stretch, float, eat, call, turn)
+ *          stretch, float, eat, call, turn; people: any `anim` the game uses, or walk, run, runflail, marchhit)
  *   t      animation time (s), or the phase of a cycle (0…1) for flap and walk
  *   view   front | back | side | side2 | three | rear | top | below | chase | ten (10 m away) | far (30 m away) | close |
  *          face (a person's head and shoulders)
  *   bg     ground: neutral (default) | white (a whitewashed wall behind, to check the gull reads) | slate | water
- *   sheet  a named contact sheet (see SHEETS: gull-views, gull-air, gull-ground, gull-flap), or cells written out as
+ *   sheet  a named contact sheet (see SHEETS: gull-views, gull-air, gull-ground, gull-flap, gestures-1 to -3), or cells written out as
  *          show|pose@t|view separated by semicolons: sheet=gull|glide|three;gull|flap@0.3|side
  *   cols   columns in a sheet
  *   light  game for the game's own sky as the environment map (slower to start); otherwise a quick stand-in

@@ -6,12 +6,15 @@
  *   gull:carry   the same, with the courier's dispatch in its bill
  *   flock        sixteen of the cheaper gulls as one mesh (the Bomber Wing, Mission.ambient)
  *   viewbill     the first-person bill, as the game's camera sees it
+ *   person:<who> one person: a look from LOOKS in figures.ts (soldier, borovsky, corporal, voronova, grushkov, general,
+ *                clerk, courier, baker, cook, marcher…), posed by any `anim` the game uses, or walk, run, runflail,
+ *                marchhit, sitflail
+ *   cast         the cast in a row as one mesh; cast:action has each doing what they are known for
  */
 import * as THREE from 'three';
 import { Cast, LOOKS, type FigurePose } from '../gull/view/figures';
 import { GullFlock, GullModel, type GullAnim } from '../gull/view/gullModel';
 import { PAL } from '../gull/view/palette';
-import { Figure as LegacyFigure, type FigureStyle as LegacyStyle } from './legacyFigure';
 
 export interface Subject {
   object: THREE.Object3D;
@@ -210,14 +213,6 @@ export function figurePose(name: string, t: number): { anim: string; phase: numb
   }
 }
 
-function legacyFigureSubject(style: string, poseName: string, t: number): Subject {
-  const f = new LegacyFigure((style || 'soldier') as LegacyStyle, { rifle: poseName === 'march' });
-  const p = figurePose(poseName, t);
-  f.pose(new THREE.Vector3(), 0, p);
-  f.mug.visible = p.anim === 'sip';
-  return { object: f.root, centre: new THREE.Vector3(0, 0.95, 0), radius: 1.12 };
-}
-
 /** Poses that unfold from the moment they start (a stretch, a throw): the studio's `t` is how long ago that was. */
 const UNFOLDING: Record<string, number> = { stretch: 0.7, throw: 0.1 };
 
@@ -322,7 +317,6 @@ function castSubject(arg: string): Subject {
 type Maker = (pose: string, t: number, arg: string) => Subject;
 export const SUBJECTS: Record<string, Maker> = {
   gull: (pose, t, arg) => gullSubject(pose || 'glide', t, arg),
-  oldfigure: (pose, t, arg) => legacyFigureSubject(arg, pose, t),
   person: (pose, t, arg) => personSubject(arg, pose, t),
   cast: (_pose, _t, arg) => castSubject(arg),
   flock: () => flockSubject(),
