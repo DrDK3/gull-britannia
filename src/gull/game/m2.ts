@@ -264,14 +264,15 @@ export class Mission2 extends Mission {
     const top = (e: number, n: number) => v3(e, n, W.cellTop(e, n));
     f.addLoafer(top(M2.stationRoof.e - 2.5, M2.stationRoof.n + 3), 2.6);
     f.addLoafer(top(M2.stationRoof.e + 1.5, M2.stationRoof.n - 4), 1.2);
-    f.addSquabble(top(M2.spawn.e + 5, M2.spawn.n + 4), 1.1);
+    f.addSquabble(top(M2.spawn.e + 5, M2.spawn.n + 4), 1.1, (e, n) => W.cellTop(e, n));
     f.addCircler(v3(M2.dorothy.e, M2.dorothy.n, wl + 27), 15, true);
     f.addCircler(v3(-252, 300, wl + 30), 18, false);
     f.addCircler(v3(-258, 345, wl + 24), 12, true);
-    const prom = { e: M2.stand.e + 0.5, n: M2.stand.n - M2.stand.l / 2 - 5 };
+    // On the pavement off the south end of the stand, below the refreshments: clear of the deck and of Osipov.
+    const prom = { e: M2.stand.e - 1.7, n: M2.stand.n - M2.stand.l / 2 - 2.5 };
     const walk = (e: number, n: number) => W.groundAt(e, n);
-    f.addBeggar(v3(prom.e, prom.n, deck), 3, walk);
-    f.addBeggar(v3(prom.e, prom.n, deck), 3, walk);
+    f.addBeggar(v3(prom.e, prom.n, deck), 2, walk);
+    f.addBeggar(v3(prom.e, prom.n, deck), 2, walk);
     const wake = new WakeTrack(v3(-255, 110, wl), v3(-250, 335, wl), 2.2, 0.6);
     f.addFollower(() => wake);
     f.addFollower(() => wake);

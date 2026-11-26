@@ -225,13 +225,17 @@ export class AmbientFlock {
     return b;
   }
 
-  /** Two gulls squabbling over nothing at `at` (the surface), lined up along `yaw`. */
-  addSquabble(at: V3, yaw = 0): [AmbientGull, AmbientGull] {
+  /**
+   * Two gulls squabbling over nothing at `at` (the surface), lined up along `yaw`. With `surface`, each stands on
+   * what is under its own feet (a sloping roof); keep them off an edge.
+   */
+  addSquabble(at: V3, yaw = 0, surface?: (e: number, n: number) => number): [AmbientGull, AmbientGull] {
     const gap = 0.45;
     const fe = Math.sin(yaw);
     const fn = Math.cos(yaw);
-    const a = this.add('squabble', v3(at.e - fe * gap, at.n - fn * gap, at.h + STAND));
-    const b = this.add('squabble', v3(at.e + fe * gap, at.n + fn * gap, at.h + STAND));
+    const stand = (e: number, n: number) => v3(e, n, (surface ? surface(e, n) : at.h) + STAND);
+    const a = this.add('squabble', stand(at.e - fe * gap, at.n - fn * gap));
+    const b = this.add('squabble', stand(at.e + fe * gap, at.n + fn * gap));
     a.yaw = yaw;
     b.yaw = wrapAngle(yaw + Math.PI);
     a.partner = b;

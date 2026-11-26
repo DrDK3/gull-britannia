@@ -287,7 +287,8 @@ describe('Ambient gulls, and "just a gull" as a system', () => {
       } else if (g.behaviour === 'beg') {
         // On foot round the clerk's bench, never far from his chips.
         expect(path[k]!).toBeGreaterThan(2);
-        expect(Math.hypot(g.pos.e - bench.e, g.pos.n - bench.n)).toBeLessThan(6);
+        expect(Math.hypot(g.pos.e - bench.e, g.pos.n - bench.n)).toBeLessThan(5);
+        expect(Math.hypot(g.pos.e - bench.e, g.pos.n - bench.n)).toBeGreaterThan(0.4);
         expect(Math.abs(g.pos.h - bench.h)).toBeLessThan(0.6);
       } else if (g.behaviour === 'follow') {
         expect(g.airborne).toBe(true);
@@ -311,6 +312,25 @@ describe('Ambient gulls, and "just a gull" as a system', () => {
       if (g.behaviour === 'circle' || g.behaviour === 'follow') expect(g.pos.h - m.world.surfaceAt(g.pos.e, g.pos.n).h).toBeGreaterThan(2);
     }
     expect(m.allies.length).toBe(4);
+  });
+
+  it('on the real town every gull stands on something or flies well clear of it, in both missions', () => {
+    for (const m of [m1(realTown()), new Mission2(realTown(), 11).init()]) {
+      if (!m.running) m.start();
+      farAway(m);
+      for (let i = 0; i < 30 * 60; i++) {
+        m.step(DT, NO_CONTROLS);
+        if (i % 30) continue;
+        for (const g of m.ambient) {
+          const up = g.pos.h - m.world.surfaceAt(g.pos.e, g.pos.n).h;
+          if (g.airborne && g.behaviour !== 'squabble') expect(up, `${m.id} ${g.id} ${g.behaviour}`).toBeGreaterThan(2);
+          if (!g.airborne) {
+            expect(up, `${m.id} ${g.id} ${g.behaviour}`).toBeGreaterThan(0);
+            expect(up, `${m.id} ${g.id} ${g.behaviour}`).toBeLessThan(0.8);
+          }
+        }
+      }
+    }
   });
 
   it('the flock is deterministic: the same seed lives the same day', () => {

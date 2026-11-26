@@ -157,9 +157,12 @@ export class M1Watch implements StealthDirector {
     f.addCircler(v3(P.dorothy.e, P.dorothy.n, wl + 26), 15, true);
     const bench = P.bench;
     const walk = (e: number, n: number) => W.groundAt(e, n);
-    f.addBeggar(v3(bench.e - 1.6, bench.n, this.g(bench)), 3.2, walk);
-    f.addBeggar(v3(bench.e - 1.6, bench.n, this.g(bench)), 3.2, walk);
-    f.addSquabble(top(P.nest.e + 15, P.nest.n - 2), 0.3);
+    // On the pavement behind the clerk, clear of the bench itself. (In front of him the ground falls to the river.)
+    const beg = v3(bench.e - 2.6, bench.n, this.g(bench));
+    f.addBeggar(beg, 2, walk);
+    f.addBeggar(beg, 2, walk);
+    // Along the middle of the nest's own flat roof, well in from its edges.
+    f.addSquabble(top(P.nest.e + 15, P.nest.n + 1), EAST, (e, n) => W.cellTop(e, n));
     // A crabber working up and down the river off the Embankment, and the two gulls that work her wake.
     this.wake = new WakeTrack(v3(-255, 110, wl), v3(-250, 335, wl), 2.2, 0.35);
     f.addFollower(() => this.wake);
