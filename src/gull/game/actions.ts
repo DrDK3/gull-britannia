@@ -37,6 +37,8 @@ export const ACTIONS = {
   camera: { kind: 'app', verb: 'change camera', keys: ['KeyC'] },
   pause: { kind: 'app', verb: 'pause', keys: ['Escape', 'KeyP'] },
   help: { kind: 'app', verb: 'show controls', keys: ['KeyH', 'F1'] },
+  log: { kind: 'app', verb: 'read the radio log', keys: ['KeyL'] },
+  repeat: { kind: 'app', verb: 'hear the last message again', keys: ['KeyV'] },
 } as const satisfies Record<string, ActionInfo>;
 
 export type ActionId = keyof typeof ACTIONS;

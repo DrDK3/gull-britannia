@@ -142,8 +142,8 @@ export class Mission2 extends Mission {
     this.spawnGull(v3(M2.spawn.e, M2.spawn.n, this.top(M2.spawn) + 0.35), Math.atan2(S.e - M2.spawn.e, S.n - M2.spawn.n), BOMBER_PROFILE);
 
     // Perches.
-    this.addPerch('church', v3(M2.spawn.e, M2.spawn.n, this.top(M2.spawn)), 'St Saviour’s roof', 'The stand is east, on the Embankment. Hold right mouse to scout.');
-    this.roostPerch = this.addPerch('roost', v3(M2.roost.e, M2.roost.n, this.top(M2.roost)), 'Royal Castle Hotel roof', 'The Bomber Wing’s roost. Press G to signal.');
+    this.addPerch('church', v3(M2.spawn.e, M2.spawn.n, this.top(M2.spawn)), 'St Saviour’s roof', 'The stand is east, on the Embankment. Hold {scout} to scout.');
+    this.roostPerch = this.addPerch('roost', v3(M2.roost.e, M2.roost.n, this.top(M2.roost)), 'Royal Castle Hotel roof', 'The Bomber Wing’s roost. {signal} calls them.');
     this.addPerch('station', v3(M2.stationRoof.e, M2.stationRoof.n, this.top(M2.stationRoof)), 'Station roof', 'Close to the parade route.');
     this.addPerch('canopy', v3(S.e, S.n, deck + 3.16), 'Stand canopy', 'Directly over the lectern. Very bold.');
     // A mooring pile in the river behind the stand: a clear view of the lectern, and nobody on parade looks that way.
@@ -242,9 +242,9 @@ export class Mission2 extends Mission {
       this.allies.push(new AllyGull(names[i]!, v3(at.e, at.n, this.top(at) + 0.25), slots[i]!, this.rng));
     });
 
-    this.addObjective('scout', 'Scout the stand: hold right mouse or T on Lt Voronova at the lectern to tag her (a mooring pile behind the stand has a clear view)', v3(M2.voronova.e, M2.voronova.n, deck + 1.7));
-    this.addObjective('signal', 'Signal the Bomber Wing from the Royal Castle Hotel roof [G]', this.roostPerch.pos, false, 'hidden');
-    this.addObjective('strike', 'Lead the flock over the formation as it passes the stand — release with Q', () => this.anchor(), false, 'hidden');
+    this.addObjective('scout', 'Scout the stand: tag Lt Voronova at the lectern (a mooring pile behind the stand has a clear view)', v3(M2.voronova.e, M2.voronova.n, deck + 1.7));
+    this.addObjective('signal', 'Signal the Bomber Wing from the Royal Castle Hotel roof', this.roostPerch.pos, false, 'hidden');
+    this.addObjective('strike', 'Lead the flock over the formation as it passes the stand, and release', () => this.anchor(), false, 'hidden');
     this.addObjective('document', 'Take the Inspection Order from the lectern', () => this.document.pos, false, 'hidden');
     this.addObjective('deliver', 'Deliver the Order to the lobster pot on the Dorothy May', this.pot.pos, false, 'hidden');
     this.addObjective('bun', 'Optional: liberate a saffron bun from the refreshment table', undefined, true);
@@ -288,7 +288,8 @@ export class Mission2 extends Mission {
 
   protected override onStart(): void {
     this.music('mission');
-    this.say('Mother', 'Bomber lead, Mother. You’re on St Saviour’s roof. The reviewing stand is east of here, on the Embankment by the river. Scout it first — there’s a mooring pile in the river behind it with a clear view of the lectern.', 7);
+    this.say('Mother', 'Bomber lead, Mother. You’re on St Saviour’s roof. The reviewing stand is east of here, on the Embankment by the river.', 7);
+    this.say('Mother', 'Scout it first. There’s a mooring pile in the river behind it with a clear view of the lectern.', 6);
     this.say2(this.grushkov, 'Magnificent. The finest garrison in Devon.');
   }
 
@@ -325,7 +326,7 @@ export class Mission2 extends Mission {
       if (this.chaosTimer <= 0) {
         if (this.passHits === 0 && this.objectiveState('strike') === 'active') {
           this.say('Mother', 'The Wing dropped on nothing in particular. They’re going home to reload — signal again from the roost, and bring them over the parade.', 6);
-          this.setObjective('signal', 'active', 'Signal the Bomber Wing again from the hotel roof [G]');
+          this.setObjective('signal', 'active', 'Signal the Bomber Wing again from the hotel roof');
         } else this.formationHolds(false);
       }
     }
@@ -421,7 +422,7 @@ export class Mission2 extends Mission {
     for (const g of [this.voronova, this.kulik, this.osipov]) g.alarmTimer = Math.max(g.alarmTimer, 15);
     if (solo) this.say('Mother', 'Good hits, but not in front of the stand — the formation held. Time it for when they pass the Commandant.', 5.5);
     else this.say('Mother', 'The formation held. The Wing is going back to reload — signal again from the roost, and drop as they pass the stand.', 6);
-    if (this.objectiveState('signal') === 'done') this.setObjective('signal', 'active', 'Signal the Bomber Wing again from the hotel roof [G]');
+    if (this.objectiveState('signal') === 'done') this.setObjective('signal', 'active', 'Signal the Bomber Wing again from the hotel roof');
   }
 
   protected override onSignal(): boolean {
@@ -476,7 +477,8 @@ export class Mission2 extends Mission {
     if (g === this.voronova && this.objectiveState('scout') === 'active') {
       this.completeObjective('scout');
       this.setObjective('signal', 'active');
-      this.say('Mother', 'Voronova. She’ll not leave that lectern unless something truly dreadful happens to the parade. The Wing is on the Royal Castle Hotel roof, across the Boat Float — signal them with G.', 7);
+      this.say('Mother', 'Voronova. She’ll not leave that lectern unless something truly dreadful happens to the parade.', 6);
+      this.say('Mother', 'The Wing is on the Royal Castle Hotel roof, across the Boat Float. Signal them from there.', 6);
     }
   }
 

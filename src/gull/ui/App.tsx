@@ -208,7 +208,7 @@ function BriefingCard({ game, st }: { game: GullGame; st: GameState }) {
         <div className="gb-stamp">{b.file}</div>
         <div className="gb-dateline">{b.dateline}</div>
         <h2>{st.operationTitle}</h2>
-        {b.body.split('\n\n').map((p, i) => (
+        {b.short.split('\n\n').map((p, i) => (
           <p key={i}>{p}</p>
         ))}
         <h3 className="gb-h">Orders</h3>

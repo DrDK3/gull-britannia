@@ -111,7 +111,7 @@ export class Mission1 extends Mission {
     this.addProp({ id: 'nest', kind: 'nest', pos: nest, yaw: 0 });
 
     // Perches.
-    this.addPerch('nest', nest, 'The Nest', 'Resistance stash. Bring food here and press [E].');
+    this.addPerch('nest', nest, 'The Nest', 'Resistance stash. Bring food here, then {interact}.');
     this.stationPerch = this.addPerch('station', v3(M1.stationRoof.e, M1.stationRoof.n, this.top(M1.stationRoof)), 'Station roof', 'Bayard’s Cove lies south along the river.');
     this.addPerch('church', v3(M1.churchRoof.e, M1.churchRoof.n, this.top(M1.churchRoof)), 'St Saviour’s roof', 'The old town at a glance.');
     this.gutterPerch = this.addPerch('gutter', v3(M1.customGutter.e, M1.customGutter.n, this.top(M1.customGutter)), 'Custom House gutter', 'Right above the dispatch. A calm sentry never looks this high.');
@@ -231,17 +231,17 @@ export class Mission1 extends Mission {
     this.mugTarget = this.addTarget({ kind: 'tea', radius: 0.6, pos: () => this.mug.pos, guard: s, active: () => this.mug.visible !== false && !this.teaSpilled });
 
     // Objectives.
-    this.addObjective('takeoff', 'Take off from the nest [Space]');
-    this.addObjective('perch', 'Land on the station roof (hold R to glide in)', this.stationPerch.pos, false, 'hidden');
-    this.addObjective('scout', 'Optional: scout the sentry on Bayard’s Cove (hold right mouse or T on him)', undefined, true, 'hidden');
-    this.addObjective('lunch', 'Lunch: snatch a chip or the pasty, then eat it [F] or stash it at the nest', undefined, false, 'hidden');
+    this.addObjective('takeoff', 'Take off from the nest');
+    this.addObjective('perch', 'Land on the station roof', this.stationPerch.pos, false, 'hidden');
+    this.addObjective('scout', 'Optional: scout the sentry on Bayard’s Cove', undefined, true, 'hidden');
+    this.addObjective('lunch', 'Lunch: snatch a chip or the pasty, then eat it or stash it at the nest', undefined, false, 'hidden');
     this.addObjective('dispatch', 'Steal the courier’s dispatch from the table outside the Custom House', () => this.dispatch.pos, false, 'hidden');
     this.addObjective('deliver', 'Deliver the dispatch to the lobster pot aboard the Dorothy May', this.pot.pos, false, 'hidden');
   }
 
   protected override onStart(): void {
     this.music('mission');
-    this.say('Mother', 'Afternoon, Scrumpy. Mother here. You’re on the nest. Space to take off when ready.', 6);
+    this.say('Mother', 'Afternoon, Scrumpy. Mother here. You’re on the nest. Take off when ready.', 6);
   }
 
   protected override tick(dt: number): void {
@@ -251,9 +251,9 @@ export class Mission1 extends Mission {
       this.completeObjective('takeoff');
       this.setObjective('perch', 'active');
       this.stationPerch.highlight = true;
-      this.say('Mother', 'W to flap, look where you want to go. Shift to dive, S to brake. Now land on the station roof by the Boat Float — hold R near it and the wings will do the rest.', 8);
+      this.say('Mother', 'Airborne. The station roof is north of you, by the Boat Float. Follow the marker and land on it.', 8);
     }
-    if (this.objectiveState('perch') === 'active' && this.hintTimer > 40) this.sayOnce('perch_hint', 'Mother', 'The station is the little building on the Embankment, north of you by the Boat Float — follow the marker. Brake with S, or hold R.', 6);
+    if (this.objectiveState('perch') === 'active' && this.hintTimer > 40) this.sayOnce('perch_hint', 'Mother', 'The station is the little building on the Embankment, by the Boat Float. Follow the marker, and come in slowly.', 6);
     // The tea mug: in hand while he sips, spilled after a hit, refilled when he is back.
     const s = this.sentry;
     const sipping = s.anim === 'sip' && s.state === GuardState.Routine;
@@ -282,7 +282,7 @@ export class Mission1 extends Mission {
     // Scouting is taught where it can work: within sight and range of the sentry.
     if (this.objectiveState('scout') === 'active' && !s.tagged && !this.hasSaid('scout_now')) {
       const d = Math.hypot(s.pos.e - g.pos.e, s.pos.n - g.pos.n, s.pos.h - g.pos.h);
-      if (d < 120 && this.lineOfSight(g.eye(), s.headPosition())) this.sayOnce('scout_now', 'Mother', 'There’s the sentry. Hold right mouse, or T, and keep him in the middle of your view to tag him.', 6);
+      if (d < 120 && this.lineOfSight(g.eye(), s.headPosition())) this.sayOnce('scout_now', 'Mother', 'There’s the sentry. Keep him in the middle of your view until he is tagged.', 6);
     }
     // Narrate the distraction window once per kind.
     if (s.state === GuardState.Distracted) {
@@ -315,8 +315,11 @@ export class Mission1 extends Mission {
       this.setObjective('scout', 'active');
       this.setObjective('lunch', 'active');
       this.setObjective('dispatch', 'active');
-      this.say('Mother', 'Good landing. Bayard’s Cove is south along the river, past the ferry slip. Fly down there, find a roof with a view, and scout the sentry before you go in.', 7);
-      this.after(9, () => this.say('Mother', 'Section G regulations: no operative works on an empty stomach. The clerk on the Embankment bench has chips. The bakery in the cove has a pasty cooling on its sill — tastier, riskier.', 8));
+      this.say('Mother', 'Good landing. Bayard’s Cove is south along the river, past the ferry slip. Find a roof with a view and scout the sentry.', 7);
+      this.after(9, () => {
+        this.say('Mother', 'Regulations: no operative works on an empty stomach. The clerk on the Embankment bench has chips.', 6);
+        this.say('Mother', 'The bakery in the cove has a pasty cooling on its sill. Tastier. Riskier.', 5);
+      });
     } else if (p === this.gutterPerch) this.sayOnce('gutter', 'Mother', 'Lovely spot. A calm sentry won’t look up this high — but a suspicious one will. Wait for his back.', 5);
     else if (p === this.lampPerch) this.sayOnce('lamp', 'Mother', 'From here you can see his tea on the barrel. He is very attached to that tea.', 5);
   }
@@ -339,7 +342,7 @@ export class Mission1 extends Mission {
       this.setObjective('deliver', 'active');
       this.say('Mother', 'You have it! Now to the Boat Float — the lobster pot on the Dorothy May. Stay high, stay ordinary.', 6);
     }
-    if (it === this.pasty) this.sayOnce('pasty', 'Mother', 'The pasty! Bold. Eat it with F, or take it home to the nest for the pantry.', 4.5);
+    if (it === this.pasty) this.sayOnce('pasty', 'Mother', 'The pasty. Bold. Eat it, or take it home to the nest for the pantry.', 4.5);
   }
 
   protected override onFoodSecured(): void {
