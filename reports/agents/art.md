@@ -1,8 +1,166 @@
-# Art, round 1: the studio page and the gull
+# Art: report
 
-Branch `agent/art`. This round was narrowed by the lead to steps 0 and 1 of the brief: the studio page, and the gull
-(the player's, the Bomber Wing and the town's other gulls). The people, the props, the effects and the shadow and rim
-work (steps 2 to 5) are not started; they are listed under "Left over".
+Branch `agent/art`. Round 1 was the studio page and the gull; round 2 is the people. The props, the effects and the
+shadow work (steps 3 to 5 of the brief) are not started.
+
+# Round 2: the people
+
+Started from `origin/main` with `origin/agent/stealth` merged in (its tracked `node_modules` link is untracked again
+on this branch).
+
+## What changed
+
+**The people are one mesh.** `src/gull/view/figures.ts` is rebuilt on `rig.ts`. A person is one merged,
+vertex-coloured geometry on a twenty-bone rig, and all the people of a mission are one skinned mesh (`Cast`): one draw
+call in each pass, whoever and however many they are. Mission 2's seventeen people, the twelve marchers among them,
+are one draw call.
+
+**They are characters.** Adult proportions (a 1.75 m reference, scaled to each person's height and build), hands with
+a thumb, and a face made to carry: heavy brows set by temperament, eyes, a moustache where there is one. A 1960s
+summer field uniform with nothing real on it: khaki tunic worn outside the breeches under a leather belt, boots, a
+side cap for the ranks and a peaked cap for officers, plain coloured shoulder boards and collar tabs. The badge is
+invented: a brass lozenge with a teal pip.
+
+| Who | Silhouette and prop |
+| --- | --- |
+| Pte Borovsky | Short and stout, over his belt; mild brows, a clipped moustache; the enamel mug with a blue rim |
+| Cpl. Dunayev | The tallest and leanest; a rifle on his back, a stripe on his sleeve, a scowl |
+| Lt Voronova | Tall and straight-backed, a skirt and boots, her hair in a bun; the clipboard held to her chest |
+| Col Grushkov | A barrel behind a grand moustache; six rows of plain ribbon bars on both sides of his chest |
+| The Marshal (`general`) | A grey greatcoat to the calf with red lapels and two rows of buttons, even in June |
+| The Clerk | Tweed jacket and tie, flat cap, round glasses, behind an open newspaper |
+| The courier | A despatch rider: goggles pushed up on his cap, gauntlets, the satchel the dispatch goes into |
+| Mrs Pascoe | Blue blouse with rolled sleeves, a long skirt, a white apron, a headscarf, a striped tea towel in her fist |
+| The cook | Whites, a toque, a moustache, a ladle |
+| The ranks | Three builds and faces, chosen by name, so the stand's sentries and the parade are not twelve of one man |
+
+**Every gesture the game asks for**: `idle`, `attention`, `march`, `salute`, `sip`, `outrage`, `scrub`, `shoo`,
+`look_up`, `look_around`, `point`, `throw`, `read`, `sit`, `flail`, `stir`, and the new `stretch` (Borovsky's tell:
+arms up and out, back arched, up on his toes). A walk with hips, knees that bend as the leg comes through, and arm
+swing; a run; a straight-legged parade step with the free arm across the belt and the other hand on the sling.
+`flail` is three things: a panic run with the arms anywhere, a man keeping his place with his arms over his cap, and
+the clerk on his bench with his newspaper over his head. Joints ease into a new pose over a third of a second instead
+of snapping.
+
+**The stealth states are drawn.**
+
+- `stretch`, the `civilian` guard style (Mrs Pascoe), Cpl. Dunayev and the courier, as above.
+- `ItemState.Taken`: the item is no longer drawn (it is in the satchel).
+- `dispatch.covered`: the stealth branch shows its `paperweight` prop; it is drawn as the mug on the dispatch, and on
+  its side once knocked off.
+- `mission.watch.wake`: a crabber is drawn where the track is, turned the way it is going. It is the existing crabber
+  prop and has no collision.
+- Splats on caps are one instanced mesh that rides each cap (they were three meshes each). A drop that lands on a
+  marcher's or a bystander's head now stays on him too.
+- Anyone the mission sits down where there is no bench (the courier at his lunch) gets a crate.
+- The ambient gulls now use the flock's own fields (`STAND`, `walking`, `walkPhase`, `bank`, `pitch`).
+
+**Colours.** The game's sky light is strong and lifts every colour: a true khaki read as pale green, as the gull's
+true grey read as white last round. The uniform, belts, tweed and Mrs Pascoe's blue are a shade darker for it, and
+the studio's quick light is now matched to `light=game`.
+
+## Draw calls
+
+Measured in the built game (`renderer.info.render.calls`, all passes of a frame, with and without each mesh).
+
+| | Before | Now |
+| --- | --- | --- |
+| A person | 25 or 26 meshes | a share of 1 mesh |
+| Mission 2's 17 people, Smooth | about 425 meshes, each in the picture and in the shadow map | **2** draw calls (547 with them, 545 without) |
+| Mission 2's people and gulls together, Smooth | about 2,070 added on Balanced by the review's count | **6** (547 against 541). The budget was 120 |
+| The same with shadow cascades (`?quality=high`) | | **8** (1,490 against 1,482) |
+| Mission 1's 6 people | about 150 meshes | 1 mesh: one draw call a pass |
+| Mission group, visible meshes: Mission 1 / Mission 2 | 143 / 543 (review); 459 in Mission 2 after round 1 | 101 / 47 |
+| Triangles | | about 2,200 a person: 37,094 for Mission 2's seventeen |
+
+What is left in the mission group is props, items, markers and vision cones: next round's work.
+
+## Screenshots (`docs/screenshots/art/`)
+
+All looked at. Studio sheets are under the game's sky light where it says so.
+
+| File | What it shows |
+| --- | --- |
+| `people_before_after.jpg` | The old box soldier above, the new below: standing, walking, saluting, at his tea, on parade |
+| `before_people_old_figures.jpg` | Eight of the old figures (drawn from the code before this round) |
+| `people_cast.jpg` | The cast in a row, at ease, one mesh, under the game's light |
+| `people_cast_in_action.jpg` | The same, each doing what they are known for |
+| `people_faces.jpg` | Ten heads and shoulders |
+| `people_gestures_1.jpg`, `_2`, `_3` | Every gesture: 27 cells |
+| `game_sentry_from_the_gutter.jpg` | Mission 1: Borovsky at his post from the Custom House gutter, chase camera |
+| `game_sentry_scouted_from_the_gutter.jpg` | The same through the scouting view, tagged, his routine above him |
+| `game_borovsky_at_his_tea.jpg`, `game_borovsky_stretch_tell.jpg` | His tea, and the tell at the river wall |
+| `game_mrs_pascoe.jpg`, `game_courier_at_lunch.jpg`, `game_corporal_posted.jpg`, `game_clerk_on_his_bench.jpg` | The rest of Mission 1's cast where the game puts them |
+| `game_dispatch_covered.jpg`, `game_dispatch_taken.jpg`, `game_wake_boat.jpg` | The mug on the dispatch; the table after the courier has taken it; the boat on the wake track |
+| `game_parade_passing_the_stand.jpg`, `game_parade_close.jpg` | Mission 2: the parade passing the stand |
+| `game_officers_on_the_stand.jpg` | Grushkov saluting, Voronova with her clipboard, the Marshal in his greatcoat |
+| `game_formation_broken.jpg`, `game_stand_in_uproar.jpg` | The formation broken; Grushkov's outrage |
+
+For the game before, compare `docs/screenshots/2.1/03_gutter_routine.jpg` and `08_formation_broken.jpg`.
+
+## Interfaces
+
+`MissionView`'s public interface is unchanged (`snapshot`, `sync`, `headOf`, `revealForWarmUp`, `onEvent`,
+`dispose`). No edit outside my files this round.
+
+`src/gull/view/figures.ts` is new inside:
+
+- `LOOKS` and `lookFor(id, style)`: a person is drawn by a look of their own if `LOOKS` has their id (`borovsky`,
+  `corporal`, `voronova`, `grushkov`, `general`, `clerk`, `courier`, `baker`, `cook`), otherwise by their style
+  (`soldier`, `officer`, `civilian`, `cook`, `sailor`). **To give a new character a silhouette, add an entry to
+  `LOOKS` under the id the mission gives them.** A `FigureLook` is plain data: height, girth, shoulders, belly, coat,
+  legs, hat, colours, brows, moustache, and what is carried.
+- `Cast(looks)`: `figures[i].pose(pos, yaw, FigurePose, dt)`, `.hide()`, `.hand` (where the right hand is),
+  `.hatMatrix`; `commit()`, `dispose()`, `mesh`.
+- `FigurePose` has two new optional fields, `mug` and `capOff`.
+- `poseFigure`, `figureGeometry`, `FIG_RIG` for anything else that wants to pose one (the studio does).
+
+For whoever writes missions: a new `anim` name that the view does not know is drawn as standing (or sitting, if they
+were); nothing breaks. An `Npc` that moves faster than 2.6 m/s is drawn running.
+
+The studio: `show=person:<who>` with `pose=` any of the game's `anim` values (or `walk`, `run`, `runflail`,
+`marchhit`, `sitflail`), `show=cast` and `show=cast:action`, the sheets `gestures-1` to `gestures-3`, and two new
+views, `face` and `ten` (ten metres away).
+
+## How it was verified
+
+- `npm run typecheck`, `npm run lint`, `npm test`: 88 tests in 11 files (83 before; 5 new in
+  `tests/gull/figuresView.test.ts`: a cast is one mesh; every look builds, well formed and the height of a person;
+  every gesture poses standing, walking and running without a NaN, for six looks; the named characters get their looks;
+  sitting lowers the hips, the hand is where a carried thing should be, and a hidden figure is collapsed).
+- The studio: the cast line-up, the faces, and all 27 gesture cells looked at and reworked (arms that crossed when
+  raised, a stretch that read as a shrug, an apron that stood off the body, a skirt the legs came through, the
+  parade's free hand up by the face, colours too pale under the game's light).
+- The built game at 960 × 540 on Smooth: the sentry from the gutter (chase and scouting), his tea, his stretch, the
+  baker, the courier and cook, the corporal posted, the clerk, the covered and the taken dispatch, the wake boat, the
+  parade passing the stand, the officers on it, the formation broken. Once with `?quality=high`: the people draw and
+  cast shadows correctly under the cascades.
+
+## Left over
+
+- **Step 3, the props; step 4, the effects; step 5, shadows.** Not started. The crate the courier sits on is a plain
+  box, the clerk's bench hides most of him from behind, and the wake boat is the old crabber.
+- **The Skipper** is not made: nobody in the game is him yet. An oilskin look is one entry in `LOOKS` when he is.
+- From the gutter with the chase camera Borovsky is about 30 pixels tall: he reads as a stout soldier by his outline
+  and his red boards, and his face only through the scouting view. That is the camera's distance, not the model.
+- Hands are mittens with a thumb. The clerk's hand passes behind his newspaper when he reaches for a chip. Skirts and
+  the greatcoat stretch rather than swing at a run. The tea towel is stiff.
+- The marchers are three builds chosen by name; the thirteenth man would repeat one of them.
+- Only a software renderer was available: nothing here was seen on a real GPU or with the Ultra preset's occlusion
+  pass.
+- The wake boat has no collision; the gull flies through it.
+
+## For the owner to decide
+
+- The invented badge (a brass lozenge with a teal pip) and the uniform's colours, which are darker than the cloth on
+  purpose.
+- The courier as a despatch rider and Mrs Pascoe's look are my inventions; the stealth and story branches describe
+  neither.
+
+# Round 1: the studio page and the gull
+
+This round was narrowed by the lead to steps 0 and 1 of the brief: the studio page, and the gull (the player's, the
+Bomber Wing and the town's other gulls).
 
 ## What changed
 
@@ -136,12 +294,11 @@ One new test file, `tests/gull/gullView.test.ts`. No new dependency.
   `?quality=high` (cascaded shadows) at 640 × 360: the gulls draw and are lit correctly.
 - The end-to-end suites were not run here; CI runs them on the branch.
 
-## Left over
+## Left over at the end of round 1
 
 Not started, by instruction:
 
-- **Step 2, the people.** `Figure` is still 25 meshes a person. `rig.ts` is built for it: all of a mission's people
-  can be one batch and one draw call a pass.
+- **Step 2, the people.** Done in round 2, above.
 - **Step 3, the props**, **step 4, the effects**, **step 5, shadows and rim** for characters. `palette.ts` and the
   helpers in `shapes.ts` (`Parts`, `mergeColoured`) are there for them and unused so far.
 

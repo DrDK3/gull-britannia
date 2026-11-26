@@ -7,7 +7,15 @@ import { World, type Grid } from '../../src/gull/game/world';
 
 export const WATER = 2.06;
 
+/** The town's heights are the same for every test: built once. (A mission adds its props to the World, not to this.) */
+let town: Grid | undefined;
+
 export function m1World(): World {
+  town ??= m1Grid();
+  return new World({ grids: [town], waterLevel: WATER, bounds: { eMin: -1150, eMax: 550, nMin: -750, nMax: 1350 } });
+}
+
+function m1Grid(): Grid {
   const e0 = -420;
   const n0 = -40;
   const cell = 0.5;
@@ -36,6 +44,5 @@ export function m1World(): World {
       h[j * nx + i] = top;
     }
   }
-  const grid: Grid = { e0, n0, cell, nx, ny, h };
-  return new World({ grids: [grid], waterLevel: WATER, bounds: { eMin: -1150, eMax: 550, nMin: -750, nMax: 1350 } });
+  return { e0, n0, cell, nx, ny, h };
 }

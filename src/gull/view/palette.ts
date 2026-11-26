@@ -27,16 +27,17 @@ export const PAL = {
   web: 0xd98f90,
   outline: 0x2a2f38,
 
-  // The garrison: a 1960s summer field uniform, khaki cotton bleached by a Devon June.
-  khaki: 0x8a8757,
-  khakiDark: 0x6f6d45,
-  khakiLight: 0xa29f6c,
-  breeches: 0x6c6a45,
-  breechesBlue: 0x2c3550,
-  greatcoat: 0x7b8088,
-  greatcoatDark: 0x5f646c,
+  // The garrison: a 1960s summer field uniform in khaki cotton. (These are darker than the cloth: the game's sky
+  // light is strong and lifts every colour, and a true khaki reads as pale green under it.)
+  khaki: 0x6b6638,
+  khakiDark: 0x524e2b,
+  khakiLight: 0x857f4b,
+  breeches: 0x585430,
+  breechesBlue: 0x222a44,
+  greatcoat: 0x636872,
+  greatcoatDark: 0x4b5059,
   facing: 0xb02a20,
-  belt: 0x5a3a22,
+  belt: 0x4a2e1a,
   brass: 0xd8b44a,
   boot: 0x1b1a19,
   bootShine: 0x34322f,
@@ -44,7 +45,7 @@ export const PAL = {
   boardOfficer: 0xd9b54c,
   tab: 0xa3261b,
   badgePip: 0x1f8f8a,
-  rifleWood: 0x6a4526,
+  rifleWood: 0x5a3819,
   rifleSteel: 0x25262a,
   ribbons: [0xc23b2e, 0xe0b23a, 0x2f6fb3, 0x3f8f4f, 0xf2efe6, 0x7a3f8f, 0xd9772b, 0x23272e],
 
@@ -61,8 +62,8 @@ export const PAL = {
   lip: 0xb86a5c,
 
   // Civilians and trades.
-  tweed: 0x7b6a52,
-  suit: 0x666b72,
+  tweed: 0x6b5a41,
+  suit: 0x565b63,
   suitDark: 0x494d55,
   shirt: 0xeeeae0,
   tie: 0x7a2a2a,
