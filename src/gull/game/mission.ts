@@ -1114,7 +1114,7 @@ export abstract class Mission implements GullHost, GuardHost {
     };
   }
 
-  /** Soldiers on duty: the people the alert ladder and the stealth score are about. */
+  /** The garrison (not the baker): the people the alert ladder and the stealth score are about, on duty or off. */
   soldiers(): Guard[] {
     return this.guards.filter((g) => !g.civilian);
   }

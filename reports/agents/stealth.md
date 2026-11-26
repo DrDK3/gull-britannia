@@ -36,6 +36,7 @@ Measured on the stand-in town (`tests/gull/m1world.ts`) with scripts that step t
 - **Borovsky** (`m1.ts`, the sentry block only). Seven steps: post, tea, river wall, a look back, post, the fort side (the bakery corner), a look back. On watching steps his head stays on the table while he walks.
 - **The pasty** (`m1watch.ts`). Mrs Pascoe is at her door for 6 s and at her oven for 7 s. A gull at the pasty in her sight is shouted at; the shout brings the sentry (a question mark, and an opening). The sentry's round also brings him within 8 m of the sill.
 - **Also in, beyond the narrowed list**: guards hear a shout, another man's whistle and a gull's long call (`Guard.hearNoise`, `Mission.emitNoise`, `Mission.longCall`). One test each; no pilot test.
+- **A fix on the way**: a sentry called away while carrying the papers back (a hit, an alert) used to keep them in his hand for the rest of the operation. He now puts them back first.
 
 Decisions taken: the clock is ten minutes (13.20 to 13.30) so that a first-time player usually finishes; finding the table empty after an unseen snatch does not cost the Ghost; a baker's shout is a question mark, not a sighting; the opening lesson is skipped in the pilot tests because it is being rewritten on `agent/ux`.
 
@@ -71,11 +72,11 @@ No line needs to change. The suite's Mission 1 sequence was replayed step for st
 
 ## Verified
 
-- `npm run typecheck`, `npm run lint`, `npm test`: 75 tests in 9 files pass (43 before). New: `stealth.test.ts` (27 tests) and `m1pilot.test.ts` (5: the unseen route, the tea route, Compromised by the alarm and by the clock, and the two routes again on the baked town). Changed: `m1.test.ts` (his round has 7 steps, not 4; the unseen run now asserts the Ghost line and A+).
+- `npm run typecheck`, `npm run lint`, `npm test`: 76 tests in 9 files pass (43 before). New: `stealth.test.ts` (28 tests) and `m1pilot.test.ts` (5: the unseen route, the tea route, Compromised by the alarm and by the clock, and the two routes again on the baked town). Changed: `m1.test.ts` (his round has 7 steps, not 4; the unseen run now asserts the Ghost line and A+).
 - The baked town caught two things the stand-in hid: a squabbling gull standing in mid-air off the edge of the nest's roof, and the begging gulls walking into the river (in front of the clerk's bench the ground falls away). Both are fixed and tested on the baked grids.
 - `tests/gull/m1world.ts` builds its grid once per test file.
 - **One `// handoff:` edit outside my files**: `tests/gull/m2pilot.test.ts`, the test "does so higher, lower, and along an outer file" now has a 30 s limit (two added comment lines and `}, 30_000);`). Its ten flights take 2 to 4 s, and reached 5.9 s here when all nine files ran at once on the shared machine, which fails the default 5 s limit. Its assertions are untouched and it passes.
-- CI on `agent/stealth`: see the last line of this file.
+- CI on `agent/stealth` is green at `4616862` (type check, lint, 76 tests, build, and both browser suites on the real town): https://github.com/DrDK3/gull-britannia/actions/runs/45858502206. The commit after it adds this report and one corrected comment.
 
 ## For others (outside my files, not done)
 
