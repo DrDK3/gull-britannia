@@ -938,6 +938,7 @@ export class GullGame {
     // game (tests and screenshot scripts set `frozen`), draw the latest state as it is.
     const alpha = this.frozen ? 1 : Math.min(1, this.accumulator / DT);
     this.model.root.visible = !!m && !(playing && this.st.camera === 'first');
+    this.model.watch(m?.gull); // handoff: art. The model reads what `pose` is not given from the gull itself (look pitch, and roll, call and eating when they exist).
     this.dropRing.visible = false;
     this.dropOnTarget = false;
     if (m) {

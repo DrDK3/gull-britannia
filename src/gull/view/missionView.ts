@@ -10,8 +10,8 @@ import type { Mission, MissionEvent, Npc, Prop } from '../game/mission';
 import type { V3 } from '../game/world';
 import { disposeObject, shared, sharedAll } from '../../render/dispose';
 import { Figure, type FigureStyle } from './figures';
-import { GullModel } from './gullModel';
-import { AllyState, type AllyGull, type Marcher } from '../game/parade';
+import { GullFlock, PLAYER_BILL, type GullAnim } from './gullModel';
+import { AllyState, type Marcher } from '../game/parade';
 
 type ToScene = (e: number, n: number, h: number, out?: THREE.Vector3) => THREE.Vector3;
 
@@ -77,6 +77,17 @@ function hull(l: number, b: number, f: number, colour: number): THREE.Group {
   add(g, boot, MAT.bottom, 0, 0.06).scale.set(1.01, 1, 1.005);
   return g;
 }
+
+/** The town's other gulls (Mission.ambient) drawn at once; more than this are not drawn. */
+const AMBIENT_MAX = 16;
+/** Beyond this (m from the camera) another gull is a speck: not posed, not drawn. */
+const FLOCK_RANGE = 450;
+/** How far ahead of the grip a carried thing's middle is (m at full size), so that the bill holds it by an edge. */
+const GRIP_AHEAD: Partial<Record<ItemKind, number>> = { dispatch: 0.06, document: 0.075, pasty: 0.04, bun: 0.03, fishhead: 0.03 };
+/** Scratch for posing the flock: one object, rewritten for each gull. */
+const FLOCK_ANIM: GullAnim = { time: 0, airborne: false, flapPhase: 0, flapping: false, braking: false, diving: false, tumbling: false, walk: 0, walkPhase: 0, floating: false, yawRate: 0, speed: 0 };
+const STEP_HZ = 60;
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** One flattened blob of a splat; four make a splat. Shared by every mission view. */
 const SPLAT_GEO = shared(new THREE.SphereGeometry(1, 8, 4));
@@ -341,7 +352,16 @@ export class MissionView {
   private readonly items = new Map<Item, { obj: THREE.Object3D; glint?: THREE.Mesh }>();
   private readonly figures = new Map<Guard | Npc, Figure>();
   private readonly marchFigs = new Map<Marcher, Figure>();
-  private readonly allyModels = new Map<AllyGull, GullModel>();
+  /** The Bomber Wing (the first slots) and the town's other gulls, one draw call for all of them. */
+  private readonly flock: GullFlock;
+  private readonly ambientSlot = new Map<string, number>();
+  private readonly ambientSeen = new Set<string>();
+  private readonly ambientFree: number[] = [];
+  private readonly walkPhase: Float32Array;
+  /** Where each standing ambient gull was when its footing was last worked out (e, n, h), and the answer. */
+  private readonly footing: Float64Array;
+  private readonly afloat: Uint8Array;
+  private readonly sv = new THREE.Vector3();
   private readonly cones = new Map<Guard, THREE.Mesh>();
   private readonly poops: THREE.Mesh[] = [];
   private readonly caps: THREE.Object3D[] = [];
@@ -395,12 +415,13 @@ export class MissionView {
       this.marchFigs.set(mm, f);
       this.group.add(f.root);
     }
-    for (const a of mission.allies) {
-      const gm = new GullModel();
-      gm.root.scale.setScalar(1.15);
-      this.allyModels.set(a, gm);
-      this.group.add(gm.root);
-    }
+    const wing = mission.allies.length;
+    this.flock = new GullFlock(wing + AMBIENT_MAX);
+    this.group.add(this.flock.mesh);
+    for (let i = AMBIENT_MAX - 1; i >= 0; i--) this.ambientFree.push(wing + i);
+    this.walkPhase = new Float32Array(wing + AMBIENT_MAX);
+    this.footing = new Float64Array((wing + AMBIENT_MAX) * 4).fill(NaN);
+    this.afloat = new Uint8Array(wing + AMBIENT_MAX);
     this.splatMesh = new THREE.InstancedMesh(SPLAT_GEO, MAT.poop, SPLAT_BLOBS);
     this.splatMesh.count = 0;
     this.splatMesh.frustumCulled = false;
@@ -508,6 +529,7 @@ export class MissionView {
     for (const n of m.npcs) keep(n, n.yaw);
     for (const mm of m.marchers) keep(mm, mm.yaw);
     for (const a of m.allies) keep(a, a.yaw);
+    for (const a of m.ambient) keep(a, a.yaw);
     for (const p of m.poops) keep(p);
     for (const t of m.thrown) keep(t);
     for (const it of m.items) if (it.state === ItemState.Loose) keep(it, it.yaw);
@@ -542,6 +564,7 @@ export class MissionView {
     this.t += dt;
     const m = this.mission;
     const v = new THREE.Vector3();
+    PLAYER_BILL.holding = !!m.beak;
     for (const [p, o] of this.props) {
       this.toScene(p.pos.e, p.pos.n, p.pos.h, o.position);
       o.rotation.y = -p.yaw;
@@ -559,10 +582,15 @@ export class MissionView {
         continue;
       }
       if (it.state === ItemState.Held && bill) {
-        // In the bill, wherever the gull is drawn this frame.
-        obj.position.copy(bill.pos);
-        obj.position.y -= 0.02;
-        obj.rotation.y = -bill.yaw + Math.PI / 2;
+        // In the bill, exactly where the gull's bill is drawn this frame: gripped by its near edge, so its middle is a
+        // little ahead along the bill.
+        // The bill points where the head does, which leads the view's heading in a turn.
+        const ahead = (GRIP_AHEAD[it.kind] ?? 0) * it.heldScale;
+        const by = PLAYER_BILL.yaw;
+        const bp = PLAYER_BILL.pitch;
+        const flat = Math.cos(bp) * ahead;
+        obj.position.set(bill.pos.x + Math.sin(by) * flat, bill.pos.y + Math.sin(bp) * ahead, bill.pos.z - Math.cos(by) * flat);
+        obj.rotation.set(0, -by + Math.PI / 2, bp, 'YZX');
       } else if (it.state === ItemState.CarriedByGuard) {
         const g = m.guards.find((x) => x.carrying === it);
         const f = g && this.figures.get(g);
@@ -570,10 +598,10 @@ export class MissionView {
           f.handR.updateWorldMatrix(true, false);
           obj.position.setFromMatrixPosition(f.handR.matrixWorld);
         } else this.toScene(it.pos.e, it.pos.n, it.pos.h, obj.position);
-        obj.rotation.y = -it.yaw;
+        obj.rotation.set(0, -it.yaw, 0);
       } else {
         this.at(it, it.state === ItemState.Loose ? alpha : 1, obj.position);
-        obj.rotation.y = -it.yaw;
+        obj.rotation.set(0, -it.yaw, 0);
       }
       obj.scale.setScalar(it.state === ItemState.Held ? it.heldScale : 1);
       if (glint) {
@@ -609,23 +637,7 @@ export class MissionView {
       f.pose(this.at(mm, alpha), this.yawAt(mm, mm.yaw, alpha), { anim: mm.anim, phase: mm.phase, moving: mm.moving, running: mm.running, time: this.t + mm.slot.x, headYaw: 0, headPitch: 0 });
       f.hat.visible = !mm.capOff;
     }
-    for (const [a, gm] of this.allyModels) {
-      const airborne = a.state !== AllyState.Roost;
-      gm.pose(this.at(a, alpha, undefined, airborne ? 0 : -0.13), this.yawAt(a, a.yaw, alpha), Math.atan2(a.vel.h, Math.max(1, Math.hypot(a.vel.e, a.vel.n))) * 0.6, {
-        time: this.t + a.slot.x,
-        airborne,
-        flapPhase: a.flapPhase,
-        flapping: a.flapping,
-        braking: false,
-        diving: false,
-        tumbling: false,
-        walk: 0,
-        walkPhase: 0,
-        floating: false,
-        yawRate: 0,
-        speed: Math.hypot(a.vel.e, a.vel.n, a.vel.h),
-      }, dt);
-    }
+    this.syncFlock(dt, camera, alpha);
     // Falling poop.
     while (this.poops.length < m.poops.length) {
       const p = new THREE.Mesh(this.poopGeo, MAT.poop);
@@ -680,7 +692,120 @@ export class MissionView {
     });
   }
 
+  /** Turn rate (rad/s) and speed (m/s) of something from its last two steps; zero when it has no history. */
+  private motion(o: { pos: V3 }, yaw: number): { yawRate: number; speed: number; flat: number; climb: number } {
+    const p = this.prev.get(o);
+    const out = this.motionOut;
+    if (!p) {
+      out.yawRate = out.speed = out.flat = out.climb = 0;
+      return out;
+    }
+    out.yawRate = wrapAngle(yaw - p.yaw) * STEP_HZ;
+    out.flat = Math.hypot(o.pos.e - p.e, o.pos.n - p.n) * STEP_HZ;
+    out.climb = (o.pos.h - p.h) * STEP_HZ;
+    out.speed = Math.hypot(out.flat, out.climb);
+    return out;
+  }
+
+  private readonly motionOut = { yawRate: 0, speed: 0, flat: 0, climb: 0 };
+
+  /** The Bomber Wing and the town's other gulls: one mesh, posed here. */
+  private syncFlock(dt: number, camera: THREE.Camera, alpha: number): void {
+    const m = this.mission;
+    const flock = this.flock;
+    const a = FLOCK_ANIM;
+    const pos = this.sv;
+    a.braking = a.diving = a.tumbling = a.floating = false;
+    a.calling = false;
+    a.walk = 0;
+    a.walkPhase = 0;
+    m.allies.forEach((ally, i) => {
+      const airborne = ally.state !== AllyState.Roost;
+      // Its place is the middle of the gull; on the roost that was set a little high for the old model.
+      this.at(ally, alpha, pos, airborne ? 0 : -0.08);
+      const mo = this.motion(ally, ally.yaw);
+      a.time = this.t;
+      a.airborne = airborne;
+      a.flapPhase = ally.flapPhase;
+      a.flapping = ally.flapping;
+      a.yawRate = airborne ? mo.yawRate : 0;
+      a.speed = Math.hypot(ally.vel.e, ally.vel.n, ally.vel.h);
+      a.diving = airborne && ally.vel.h < -6;
+      flock.place(i, pos, this.yawAt(ally, ally.yaw, alpha), Math.atan2(ally.vel.h, Math.max(1, Math.hypot(ally.vel.e, ally.vel.n))) * 0.6, a, dt, 1.08);
+    });
+    a.diving = false;
+    // The town's gulls: whatever the mission lists, each kept in its own slot for as long as it is listed.
+    const world = m.world;
+    const seen = this.ambientSeen;
+    seen.clear();
+    const n = Math.min(m.ambient.length, AMBIENT_MAX);
+    for (let k = 0; k < n; k++) {
+      const g = m.ambient[k]!;
+      seen.add(g.id);
+      let slot = this.ambientSlot.get(g.id);
+      if (slot === undefined) {
+        slot = this.ambientFree.pop();
+        if (slot === undefined) continue;
+        this.ambientSlot.set(g.id, slot);
+        flock.reset(slot);
+        this.walkPhase[slot] = 0;
+        this.footing[slot * 4] = NaN;
+      }
+      this.at(g, alpha, pos);
+      if (camera.position.distanceToSquared(pos) > FLOCK_RANGE * FLOCK_RANGE) {
+        flock.hide(slot);
+        continue;
+      }
+      const mo = this.motion(g, g.yaw);
+      a.time = this.t;
+      a.airborne = g.airborne;
+      a.flapping = g.flapping;
+      a.flapPhase = g.flapPhase;
+      a.calling = g.calling;
+      a.floating = false;
+      a.walk = 0;
+      let pitch = 0;
+      if (g.airborne) {
+        a.yawRate = mo.yawRate;
+        a.speed = mo.speed || 11;
+        pitch = Math.atan2(mo.climb, Math.max(1, mo.flat)) * 0.6;
+      } else {
+        // Standing or afloat. Its place is the middle of its 0.3 m ball, as the player's gull's is, or (if it was
+        // given the spot it stands on) its feet: either way the feet go on what is under it.
+        // (Worked out when it moves, not every frame.)
+        const f = slot * 4;
+        if (!(Math.abs(this.footing[f]! - g.pos.e) + Math.abs(this.footing[f + 1]! - g.pos.n) + Math.abs(this.footing[f + 2]! - g.pos.h) < 0.01)) {
+          const under = world.supportUnder(g.pos, 0.3);
+          this.footing[f] = g.pos.e;
+          this.footing[f + 1] = g.pos.n;
+          this.footing[f + 2] = g.pos.h;
+          this.footing[f + 3] = g.pos.h - under.h > 0.15 ? g.pos.h - 0.3 : g.pos.h;
+          this.afloat[slot] = under.water && this.footing[f + 3]! < world.waterLevel + 0.2 ? 1 : 0;
+        }
+        const feet = this.footing[f + 3]!;
+        a.floating = this.afloat[slot] === 1;
+        this.at(g, alpha, pos, feet - g.pos.h + (a.floating ? 0.06 : 0.17));
+        a.yawRate = 0;
+        a.speed = mo.flat;
+        a.walk = a.floating ? 0 : Math.min(1, mo.flat / 1.2);
+        this.walkPhase[slot] = (this.walkPhase[slot]! + dt * mo.flat * 1.6) % 1;
+      }
+      a.walkPhase = this.walkPhase[slot]!;
+      flock.place(slot, pos, this.yawAt(g, g.yaw, alpha), pitch, a, dt);
+    }
+    if (this.ambientSlot.size > seen.size) {
+      for (const [id, slot] of this.ambientSlot) {
+        if (seen.has(id)) continue;
+        flock.hide(slot);
+        this.ambientFree.push(slot);
+        this.ambientSlot.delete(id);
+      }
+    }
+    flock.commit();
+  }
+
   dispose(): void {
+    this.flock.dispose();
     this.group.removeFromParent();
     // Geometries, this mission's own materials and its canvas textures (name plates, banners); shared ones stay.
     disposeObject(this.group);

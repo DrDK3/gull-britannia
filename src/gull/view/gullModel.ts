@@ -7,7 +7,7 @@
  * heading and pitch.
  */
 import * as THREE from 'three';
-import { BILL_GRIP, GULL_RIG, buildGullGeometry, buildViewBill, newGullState, poseGull, type GullAnim, type GullBone } from './gullRig';
+import { BILL_GRIP, GULL_RIG, buildGullGeometry, buildViewBill, newGullState, poseGull, type GullAnim, type GullBone, type GullState } from './gullRig';
 import { PAL } from './palette';
 import { RigBatch, RigPose, rigMaterial, type RigGeometry } from './rig';
 
@@ -31,8 +31,21 @@ export function gullGeometry(detail: 'hero' | 'flock'): RigGeometry<GullBone> {
   return (FLOCK ??= buildGullGeometry('flock'));
 }
 
+/**
+ * The player's bill as last drawn, for whatever hangs in it: which way it points (compass heading and pitch, rad),
+ * set by `billPosition`; and whether it is holding something, set by the mission view, so that the gull keeps its
+ * head still (no preening with a dispatch in its bill).
+ */
+export const PLAYER_BILL = { yaw: 0, pitch: 0, holding: false };
+
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+/** Is the watched gull calling? Any of: `calling: true`, a running `callTimer` or `call`, a `callState` that is not idle. */
+function isCalling(w: Record<string, unknown>): boolean {
+  if (w.calling === true) return true;
+  if ((num(w.callTimer) ?? 0) > 0 || (num(w.call) ?? 0) > 0) return true;
+  return typeof w.callState === 'string' && w.callState !== '' && !/^(none|idle|quiet|off)$/i.test(w.callState);
+}
 
 export class GullModel {
   readonly root = new THREE.Group();
@@ -47,6 +60,8 @@ export class GullModel {
   private quiet = 0;
   private beak?: THREE.Mesh;
   private watched: Record<string, unknown> | undefined;
+  /** How loud the watched gull is just now (its `noise`, 0 if it has none): for effects; the model draws nothing from it. */
+  noise = 0;
 
   constructor() {
     this.root.name = 'player-gull';
@@ -60,9 +75,10 @@ export class GullModel {
   }
 
   /**
-   * Give the model the game's gull to read what `pose` is not told: where it is looking (pitch), and, when the
-   * flight model has them, `roll`, a call state (`calling` or `callTimer`) and `eatingTimer`. Every field is
-   * optional and checked, so this works with a gull that has none of them.
+   * Give the model the game's gull to read what `pose` is not told: where it is looking (`pitch`), `scouting`,
+   * `eatingTimer`, and, when the flight model has them, `roll` (rad, positive = right wing down), `noise`, an
+   * `airState` name and a call state (`calling`, `callTimer`, `call` or `callState`). Every field is optional and
+   * checked, so this works with a gull that has none of them.
    */
   watch(gull: object | undefined): void {
     this.watched = gull as Record<string, unknown> | undefined;
@@ -71,6 +87,10 @@ export class GullModel {
   /** Where the bill grips what it carries, in the scene now (call after `pose`). */
   billPosition(out = new THREE.Vector3()): THREE.Vector3 {
     this.root.updateWorldMatrix(true, false);
+    // The head's forward axis (−z), in the gull's own frame: the bill's heading and pitch.
+    const e = this.rig.world[GULL_RIG.index.head]!.elements;
+    PLAYER_BILL.yaw = (this.bodyYaw ?? 0) + Math.atan2(-e[8]!, e[10]!);
+    PLAYER_BILL.pitch = Math.atan2(-e[9]!, Math.hypot(e[8]!, e[10]!));
     return this.rig.point('head', BILL_GRIP[0], BILL_GRIP[1], BILL_GRIP[2], out).applyMatrix4(this.root.matrixWorld);
   }
 
@@ -80,9 +100,8 @@ export class GullModel {
     const m = new THREE.Mesh(buildViewBill(), rigMaterial());
     m.name = 'view-bill';
     // Seen from just above and behind its base, as the gull sees its own bill.
-    m.position.set(0, -0.082, -0.1);
-    m.rotation.x = 0.16;
-    m.scale.set(1.25, 1.25, 1.1);
+    m.position.set(0, -0.098, -0.13);
+    m.rotation.x = 0.1;
     this.beak = m;
     return m;
   }
@@ -92,8 +111,17 @@ export class GullModel {
     const w = this.watched;
     const an = Object.assign(this.anim, a);
     an.roll = a.roll ?? (w ? num(w.roll) : undefined);
-    an.calling = a.calling ?? (w ? w.calling === true || (num(w.callTimer) ?? 0) > 0 : undefined);
+    an.calling = a.calling ?? (w ? isCalling(w) : undefined);
     an.eating = a.eating ?? (w ? (num(w.eatingTimer) ?? 0) > 0 : undefined);
+    if (w) {
+      this.noise = num(w.noise) ?? 0;
+      // A named air state, if the flight model has one, fills in what the flags do not say.
+      const air = typeof w.airState === 'string' ? w.airState.toLowerCase() : '';
+      if (air && a.airborne) {
+        if (!a.braking && /brake|flare|hover|land/.test(air)) an.braking = true;
+        if (!a.diving && /dive|stoop/.test(air)) an.diving = true;
+      }
+    }
     an.idle = a.idle;
     an.idleT = a.idleT;
     an.attentive = a.attentive;
@@ -116,10 +144,10 @@ export class GullModel {
     this.bodyYaw += off * (1 - Math.exp(-rate * dt));
     const lead = wrap(yaw - this.bodyYaw);
     // Left alone on a perch for a moment, it looks about for itself; otherwise the head is the player's.
-    const own = a.lookYaw === undefined && !a.airborne && this.quiet > 1.6 && !(w && w.scouting === true);
+    const own = a.lookYaw === undefined && !a.airborne && this.quiet > 1.6 && !(w && w.scouting === true) && !PLAYER_BILL.holding;
     an.lookYaw = a.lookYaw ?? (own ? undefined : lead);
     an.lookPitch = a.lookPitch ?? (own ? undefined : w ? num(w.pitch) : undefined);
-    an.attentive ??= !own && !a.airborne && this.quiet < 4;
+    an.attentive ??= PLAYER_BILL.holding || (!own && !a.airborne && this.quiet < 4);
 
     this.root.position.copy(pos);
     this.root.rotation.set(0, -this.bodyYaw, 0);
@@ -132,5 +160,66 @@ export class GullModel {
   dispose(): void {
     this.batch.dispose();
     this.beak?.geometry.dispose();
+  }
+}
+
+const UP = new THREE.Vector3(0, 1, 0);
+
+/**
+ * Other gulls, cheaply: up to `capacity` of them as one mesh and one draw call (the Bomber Wing, the town's gulls in
+ * Mission.ambient). The same bird as the player's, with coarser feathers and no rim. Each has its own easing, so
+ * they open their wings, bank and call for themselves.
+ */
+export class GullFlock {
+  readonly mesh: THREE.SkinnedMesh;
+  private readonly batch: RigBatch;
+  private readonly rig = new RigPose(GULL_RIG);
+  private readonly states: GullState[] = [];
+  private readonly shown: boolean[] = [];
+  private readonly root = new THREE.Matrix4();
+  private readonly q = new THREE.Quaternion();
+  private readonly s = new THREE.Vector3();
+
+  constructor(readonly capacity: number) {
+    this.batch = new RigBatch([{ geo: gullGeometry('flock'), copies: Math.max(1, capacity) }], rigMaterial(), 'gull-flock');
+    this.mesh = this.batch.mesh;
+    for (let i = 0; i < capacity; i++) {
+      this.states.push(newGullState(0.11 + i * 0.618));
+      this.shown.push(false);
+    }
+  }
+
+  /** Draw gull `i` this frame: its centre (in the frame of the mesh's parent), compass heading, flight-path pitch. */
+  place(i: number, pos: THREE.Vector3, yaw: number, pitch: number, a: GullAnim, dt: number, scale = 1): void {
+    const st = this.states[i];
+    const slot = this.batch.slots[i];
+    if (!st || !slot) return;
+    poseGull(this.rig, st, a, pitch, dt);
+    this.root.compose(pos, this.q.setFromAxisAngle(UP, -yaw), this.s.set(scale, scale, scale));
+    this.rig.solve(this.root);
+    this.rig.write(this.batch.matrices, slot.bone);
+    this.shown[i] = true;
+  }
+
+  /** Gull `i` is not drawn (until placed again). */
+  hide(i: number): void {
+    const slot = this.batch.slots[i];
+    if (!slot || !this.shown[i]) return;
+    this.batch.hide(slot);
+    this.shown[i] = false;
+  }
+
+  /** A different gull takes slot `i`: forget the old one's easing. */
+  reset(i: number, seed = 0.11 + i * 0.618): void {
+    if (this.states[i]) this.states[i] = newGullState(seed);
+  }
+
+  /** After placing and hiding: send the poses to the GPU. */
+  commit(): void {
+    this.batch.commit();
+  }
+
+  dispose(): void {
+    this.batch.dispose();
   }
 }

@@ -17,6 +17,7 @@ export const PAL = {
   bill: 0xf3c02b,
   billPale: 0xf8dc7c,
   gonys: 0xd3301c,
+  nostril: 0x9a7412,
   mouth: 0xc9564e,
   iris: 0xf6ecae,
   orbital: 0xf0a31c,

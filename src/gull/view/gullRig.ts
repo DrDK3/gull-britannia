@@ -53,6 +53,9 @@ const BILL_LOWER: Ring[] = [
   [-0.328, 0.0027, 0.001, 0, 0.0195, 0.0032],
 ];
 
+/** The nostril: a dark slit on each side of the upper mandible. */
+const nostril = (x: number, y: number, z: number) => Math.abs(x) > 0.0085 && y > 0.022 && y < 0.03 && z < -0.268 && z > -0.288;
+
 const side = (p: readonly [number, number, number], s: number): [number, number, number] => [p[0] * s, p[1], p[2]];
 
 export const GULL_RIG = new RigDef<GullBone>([
@@ -202,11 +205,7 @@ export function buildGullGeometry(detail: GullDetail = 'hero'): RigGeometry<Gull
     [0.228, 0.006, 0.005, 0, 0.006],
   ];
   b.add(tube('z', BODY, { seg, smooth: hero ? 2 : 1 }), PAL.gullWhite, 'body', {
-    paint: (_x, y, z, _nx, ny) => {
-      if (ny > 0.42 && z > -0.092 && z < 0.128) return PAL.mantle;
-      if (ny < -0.55 && y < -0.02) return PAL.gullShade;
-      return undefined;
-    },
+    paint: (_x, _y, z, _nx, ny) => (ny > 0.42 && z > -0.092 && z < 0.128 ? PAL.mantle : undefined),
   });
 
   // ---------------------------------------------------------------- neck and head
@@ -234,7 +233,7 @@ export function buildGullGeometry(detail: GullDetail = 'hero'): RigGeometry<Gull
 
   // Bill: the upper mandible with its hooked tip, on the head; the lower, deepest at the gonys, on the jaw.
   b.add(tube('z', BILL_UPPER, { seg: 8, smooth: 1 }), PAL.bill, 'head', {
-    paint: (_x, _y, z, _nx, ny) => (ny < -0.8 ? PAL.mouth : z < -0.323 ? PAL.billPale : undefined),
+    paint: (x, y, z, _nx, ny) => (ny < -0.8 ? PAL.mouth : z < -0.323 ? PAL.billPale : nostril(x, y, z) ? PAL.nostril : undefined),
   });
   b.add(tube('z', BILL_LOWER, { seg: 8, smooth: 1 }), PAL.bill, 'jaw', {
     paint: (_x, y, z, _nx, ny) => (ny > 0.8 ? PAL.mouth : z < -0.29 && z > -0.315 && y < 0.019 ? PAL.gonys : undefined),
@@ -351,8 +350,9 @@ export function buildGullGeometry(detail: GullDetail = 'hero'): RigGeometry<Gull
       paint: (_x, y, z, _nx, ny) => {
         if (z < 0.118) return y < -0.012 && z > -0.03 ? PAL.mantleEdge : undefined;
         if (z < 0.136) return PAL.gullWhite;
+        // The white tips of the folded primaries: small marks along the upper edge of the black.
         const spot = (z > 0.178 && z < 0.194) || (z > 0.216 && z < 0.232) || (z > 0.252 && z < 0.268) || (z > 0.287 && z < 0.301);
-        return spot && ny > -0.3 ? PAL.gullWhite : PAL.primary;
+        return spot && ny > 0.35 ? PAL.gullWhite : PAL.primary;
       },
     });
 
@@ -380,7 +380,7 @@ export function buildViewBill(): THREE.BufferGeometry {
   const def = new RigDef<'bill'>([{ name: 'bill', at: [0, 0, 0] }]);
   const b = new RigBuilder(def);
   const z0 = 0.255;
-  b.add(tube('z', BILL_UPPER, { seg: 10, smooth: 2 }).translate(0, -0.0215, z0), PAL.bill, 'bill', { paint: (_x, _y, z) => (z < -0.068 ? PAL.billPale : undefined) });
+  b.add(tube('z', BILL_UPPER, { seg: 10, smooth: 2 }).translate(0, -0.0215, z0), PAL.bill, 'bill', { paint: (x, y, z) => (z < -0.058 ? PAL.billPale : nostril(x, y + 0.0215, z - z0) ? PAL.nostril : undefined) });
   b.add(tube('z', BILL_LOWER, { seg: 10, smooth: 2 }).translate(0, -0.0215, z0), PAL.bill, 'bill', {
     paint: (_x, y, z) => (z < -0.035 && z > -0.06 && y < -0.003 ? PAL.gonys : undefined),
   });
@@ -415,7 +415,7 @@ export interface GullAnim {
   /** Turn rate (rad/s): the body banks into turns. */
   yawRate: number;
   speed: number;
-  /** Bank (rad, positive to the right) when the flight model has its own; otherwise it follows the turn rate. */
+  /** Bank (rad, positive = right wing down) when the flight model has its own; otherwise it follows the turn rate. */
   roll?: number;
   /** Where the gull is looking: right of the way its body points, and above the horizon (rad). */
   lookYaw?: number;
@@ -462,6 +462,12 @@ export function newGullState(seed = 0): GullState {
   return { seed, clock: seed * 7.3, air: 0, spread: 0, flap: 0, brake: 0, dive: 0, tumble: 0, float: 0, walk: 0, bank: 0, pitch: 0, legs: 1, fan: 0, headYaw: 0, headPitch: 0, headRoll: 0, call: 0, callT: 0, eat: 0, stretch: 0, preen: 0, started: false };
 }
 
+const I_BODY = GULL_RIG.index.body;
+const I_NECK = GULL_RIG.index.neck;
+const I_HEAD = GULL_RIG.index.head;
+const QD = new THREE.Quaternion();
+const QN = new THREE.Quaternion();
+const EU = new THREE.Euler();
 const clamp = (x: number, lo: number, hi: number) => (x < lo ? lo : x > hi ? hi : x);
 const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const sstep = (a: number, b: number, x: number) => {
@@ -547,7 +553,8 @@ export function poseGull(pose: RigPose<GullBone>, st: GullState, a: GullAnim, pi
   // ---- body attitude
   const wantPitch = flying ? clamp(pitch * 0.8, -0.9, 0.6) + st.brake * 0.42 - st.dive * 0.1 : a.tumbling ? 0 : a.floating ? 0.07 : 0.2 - st.walk * 0.1;
   st.pitch += (wantPitch - st.pitch) * ease(10);
-  const wantBank = flying ? clamp(a.roll ?? -a.yawRate * 0.28, -0.9, 0.9) : 0;
+  // Positive roll is right wing down, which is a negative turn about the model's z.
+  const wantBank = flying ? clamp(a.roll !== undefined ? -a.roll : -a.yawRate * 0.28, -0.9, 0.9) : 0;
   st.bank += (wantBank - st.bank) * ease(10);
   const up = beat(a.flapPhase);
   const rec = recovery(a.flapPhase);
@@ -602,7 +609,7 @@ export function poseGull(pose: RigPose<GullBone>, st: GullState, a: GullAnim, pi
     // Into a turn the inner wing draws in a little.
     const inner = clamp(-st.bank * s, 0, 1) * 0.35;
     // Open, in the air.
-    let raise = glideDihedral + st.flap * (0.1 + up * 0.62) + flutter;
+    let raise = glideDihedral * (1 - st.flap * 0.5) + st.flap * up * 0.6 + flutter;
     let sweep = 0.04 + speedSweep + st.dive * 0.42 - st.brake * 0.22 + st.flap * rec * 0.12 + inner * 0.2;
     let twist = st.brake * 0.3 - st.flap * up * 0.05 * 0 + st.flap * (rec * 0.22 - (1 - rec) * 0.08);
     let elbow = st.dive * 0.95 + st.flap * rec * 0.42 + inner * 0.25 - st.brake * 0.08;
@@ -694,9 +701,8 @@ export function poseGull(pose: RigPose<GullBone>, st: GullState, a: GullAnim, pi
     lookRoll = hash(k * 7 + 3 + st.seed) < 0.22 ? (hash(k * 9 + st.seed) - 0.5) * 0.7 : 0;
   }
   if (flying) {
-    // Into the turn, and level with the horizon whatever the wings are doing.
+    // Into the turn.
     if (a.lookYaw === undefined) lookYaw += clamp(a.yawRate * 0.22, -0.7, 0.7);
-    lookRoll -= st.bank * 0.85;
   }
   lookYaw = clamp(lookYaw, -1.5, 1.5);
   lookPitch = clamp(lookPitch, -1.1, 0.9);
@@ -706,17 +712,19 @@ export function poseGull(pose: RigPose<GullBone>, st: GullState, a: GullAnim, pi
   let neckPitch = ground * 0.82 + st.float * 0.62 - st.dive * 0.05 + st.brake * 0.12;
   // Standing, the neck is drawn up; on the wing it is drawn in.
   const neckLong = (ground + st.float) * 0.03;
-  let headPitch = clamp(st.headPitch - st.pitch - neckPitch, -1.2, 1.2);
-  let headYaw = st.headYaw;
-  let neckYaw = 0;
-  let headRoll = st.headRoll;
+  // Where the head points, in the frame of the gull's heading (not its body's): right of ahead, above level, tilt.
+  // Set this way it stays level with the horizon however the body pitches and banks.
+  let wantYaw = st.headYaw;
+  let headAim = st.headPitch;
+  let wantRoll = st.headRoll + (flying ? st.bank * 0.15 : 0);
+  let neckYaw = wantYaw * 0.4;
   let neckZ = 0;
   let jaw = 0;
   // Walking: the head thrusts forward and then holds as the body catches up.
   if (st.walk > 0.02) {
     const saw = (a.walkPhase * 2) % 1;
     neckZ += st.walk * ground * (sstep(0, 0.22, saw) * (1 - saw) - 0.35) * 0.03;
-    headPitch += st.walk * ground * Math.sin(saw * TAU) * 0.04;
+    headAim += st.walk * ground * Math.sin(saw * TAU) * 0.04;
   }
   if (st.eat > 0.01) {
     // Down to it, then a toss back and a swallow.
@@ -724,7 +732,7 @@ export function poseGull(pose: RigPose<GullBone>, st: GullState, a: GullAnim, pi
     const dip = sstep(0, 0.3, e) * (1 - sstep(0.42, 0.62, e));
     const toss = sstep(0.5, 0.72, e) * (1 - sstep(0.85, 1, e));
     neckPitch += st.eat * (-dip * 0.75 + toss * 0.35);
-    headPitch += st.eat * (-dip * 0.5 + toss * 0.5);
+    headAim += st.eat * (-dip * 1.1 + toss * 0.75);
     jaw += st.eat * (dip * 0.25 + toss * (0.3 + Math.sin(t * 30) * 0.12));
   }
   if (st.call > 0.01) {
@@ -732,24 +740,30 @@ export function poseGull(pose: RigPose<GullBone>, st: GullState, a: GullAnim, pi
     const bow = 1 - sstep(0.2, 0.55, st.callT);
     const thrown = sstep(0.3, 0.75, st.callT);
     neckPitch += st.call * (-bow * 0.5 + thrown * 0.55);
-    headPitch += st.call * (-bow * 0.45 + thrown * 0.75);
+    headAim += st.call * (-bow * 0.8 + thrown * 1.15);
     jaw += st.call * (0.18 + thrown * (0.38 + Math.max(0, Math.sin(st.callT * TAU * 3.6)) * 0.22));
-    headYaw *= 1 - st.call;
+    wantYaw *= 1 - st.call;
+    neckYaw *= 1 - st.call;
   }
   if (st.preen > 0.01) {
     // Round over the shoulder and down into the feathers, nibbling.
     const p = st.preen;
-    neckYaw += -preenSide * p * 1.25;
-    headYaw = mix(headYaw, -preenSide * 1.3, p);
-    neckPitch += p * 0.15;
-    headPitch = mix(headPitch, -0.75 + Math.sin(t * 21) * 0.07, p);
-    headRoll = mix(headRoll, preenSide * 0.35, p);
+    wantYaw = mix(wantYaw, preenSide * 2.5, p);
+    neckYaw = mix(neckYaw, preenSide * 1.3, p);
+    neckPitch += p * 0.12;
+    headAim = mix(headAim, -0.72 + Math.sin(t * 21) * 0.07, p);
+    wantRoll = mix(wantRoll, preenSide * 0.25, p);
     jaw += p * (0.06 + Math.max(0, Math.sin(t * 21)) * 0.08);
   }
   if (st.tumble > 0.01) jaw += st.tumble * 0.3;
-  pose.rot('neck', neckPitch, -neckYaw - headYaw * 0.35, 0, 'YXZ');
+  pose.rot('neck', neckPitch, -neckYaw, 0, 'YXZ');
   pose.move('neck', 0, 0, neckZ);
-  pose.rot('head', headPitch, -headYaw * 0.65, headRoll, 'YXZ');
+  const head = pose.q[I_HEAD]!;
+  QD.setFromEuler(EU.set(headAim, -wantYaw, wantRoll, 'YXZ'));
+  QN.multiplyQuaternions(pose.q[I_BODY]!, pose.q[I_NECK]!);
+  head.copy(QN).invert().multiply(QD);
+  // Tumbling, it goes with the body.
+  if (st.tumble > 0.01) head.slerp(QD.setFromEuler(EU.set(-neckPitch, 0, 0, 'XYZ')), st.tumble);
   pose.move('head', 0, neckLong * 0.25, -neckLong);
   pose.rot('jaw', -Math.max(0, jaw), 0, 0);
 }

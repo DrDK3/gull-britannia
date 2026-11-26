@@ -220,8 +220,10 @@ export class RigBuilder<B extends string = string> {
       this.pos.push(x, y, z);
       this.nor.push(n.getX(i), n.getY(i), n.getZ(i));
       this.col.push(r, gg, b);
-      if (typeof skin === 'string') this.si.push(fixed, 0, 0, 0), this.sw.push(1, 0, 0, 0);
-      else {
+      if (typeof skin === 'string') {
+        this.si.push(fixed, 0, 0, 0);
+        this.sw.push(1, 0, 0, 0);
+      } else {
         skin(x, y, z, so);
         this.si.push(so.a, so.b, 0, 0);
         this.sw.push(1 - so.w, so.w, 0, 0);
@@ -334,7 +336,7 @@ class DirectSkeleton extends THREE.Skeleton {
  * and scatter light, and a white gull seen from below should not go as dark as a slate roof. It scales with the
  * scene's hemisphere light, so it fades with the day.
  */
-export const RIG_WRAP = { value: 0.3 };
+export const RIG_WRAP = { value: 0.5 };
 
 /** One material for every rigged model: vertex colours, matt. Shared; never disposed with a batch. */
 let RIG_MATERIAL: THREE.MeshStandardMaterial | undefined;
@@ -347,11 +349,12 @@ export function rigMaterial(): THREE.MeshStandardMaterial {
       '#include <lights_fragment_end>',
       /* glsl */ `#include <lights_fragment_end>
 #if ( NUM_HEMI_LIGHTS > 0 )
-	reflectedLight.indirectDiffuse += hemisphereLights[ 0 ].skyColor * uRigWrap * BRDF_Lambert( material.diffuseColor );
+	float rigDown = 0.5 - 0.5 * dot( normal, hemisphereLights[ 0 ].direction );
+	reflectedLight.indirectDiffuse += hemisphereLights[ 0 ].skyColor * uRigWrap * mix( 0.3, 1.0, rigDown ) * BRDF_Lambert( material.diffuseColor );
 #endif`,
     );
   };
-  m.customProgramCacheKey = () => 'rig-wrap-1';
+  m.customProgramCacheKey = () => 'rig-wrap-2';
   RIG_MATERIAL = shared(m);
   return m;
 }
