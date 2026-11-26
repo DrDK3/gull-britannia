@@ -10,7 +10,8 @@
  *   pose   its pose or animation (gull: glide, flap, bank, brake, dive, tumble, stand, walk, look, shuffle, preen,
  *          stretch, float, eat, call, turn)
  *   t      animation time (s), or the phase of a cycle (0…1) for flap and walk
- *   view   front | back | side | side2 | three | rear | top | below | chase | far ("30 m away") | close
+ *   view   front | back | side | side2 | three | rear | top | below | chase | ten (10 m away) | far (30 m away) | close |
+ *          face (a person's head and shoulders)
  *   bg     ground: neutral (default) | white (a whitewashed wall behind, to check the gull reads) | slate | water
  *   sheet  a named contact sheet (see SHEETS: gull-views, gull-air, gull-ground, gull-flap), or cells written out as
  *          show|pose@t|view separated by semicolons: sheet=gull|glide|three;gull|flap@0.3|side
@@ -112,9 +113,9 @@ if (GAME_LIGHT) {
   scene.environmentIntensity = 0.49;
   pmrem.dispose();
 } else {
-  scene.add(new THREE.HemisphereLight(new THREE.Color(0.7, 0.82, 1.0), new THREE.Color(0.5, 0.56, 0.64), 1.9));
+  scene.add(new THREE.HemisphereLight(new THREE.Color(0.72, 0.83, 1.0), new THREE.Color(0.56, 0.62, 0.7), 2.7));
   // The models' own share of sky light (rig.ts) is set for the game's dimmer hemisphere light: scale it to this one.
-  RIG_WRAP.value *= 0.46 / 1.9;
+  RIG_WRAP.value *= 0.46 / 2.7;
 }
 
 const GROUNDS: Record<string, number> = { neutral: 0x8f958c, white: 0xb9b5aa, slate: 0x56606a, water: 0x4d7c84 };
@@ -144,7 +145,7 @@ function aim(view: string, s: Subject, aspect: number): void {
   camera.fov = 30;
   // Fit the radius in the smaller of the two angles.
   const half = (camera.fov * Math.PI) / 360;
-  const fit = (r * 1.12) / Math.sin(Math.min(half, Math.atan(Math.tan(half) * aspect)));
+  const fit = s.size ? Math.max(s.size[1] / 2 / Math.tan(half), s.size[0] / 2 / (Math.tan(half) * aspect)) * 1.06 : (r * 1.12) / Math.sin(Math.min(half, Math.atan(Math.tan(half) * aspect)));
   let dir = new THREE.Vector3(0.62, 0.38, -0.69);
   let d = fit;
   wall.position.set(c.x, 15, c.z + 3.5);
@@ -190,6 +191,20 @@ function aim(view: string, s: Subject, aspect: number): void {
       camera.aspect = aspect;
       camera.updateProjectionMatrix();
       return;
+    case 'face':
+      // A head and shoulders.
+      camera.fov = 30;
+      camera.position.set(c.x + 0.45, c.y + r * 0.63, c.z - 1.25);
+      camera.lookAt(c.x, c.y + r * 0.6, c.z);
+      camera.aspect = aspect;
+      camera.updateProjectionMatrix();
+      return;
+    case 'ten':
+      // Ten metres away, as the game would show it: where a face has to read.
+      camera.fov = 70;
+      dir.set(0.35, 0.12, -0.93);
+      d = 10;
+      break;
     case 'far':
       // Thirty metres away, as the game would show it.
       camera.fov = 70;

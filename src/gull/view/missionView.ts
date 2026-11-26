@@ -9,9 +9,10 @@ import { ItemState, type Item, type ItemKind } from '../game/items';
 import type { Mission, MissionEvent, Npc, Prop } from '../game/mission';
 import type { V3 } from '../game/world';
 import { disposeObject, shared, sharedAll } from '../../render/dispose';
-import { Figure, type FigureStyle } from './figures';
+import { Cast, capTop, lookFor, type Figure, type FigureLook, type FigurePose } from './figures';
 import { GullFlock, PLAYER_BILL, type GullAnim } from './gullModel';
 import { AllyState, type Marcher } from '../game/parade';
+import { STAND } from '../game/ambient';
 
 type ToScene = (e: number, n: number, h: number, out?: THREE.Vector3) => THREE.Vector3;
 
@@ -88,6 +89,19 @@ const GRIP_AHEAD: Partial<Record<ItemKind, number>> = { dispatch: 0.06, document
 const FLOCK_ANIM: GullAnim = { time: 0, airborne: false, flapPhase: 0, flapping: false, braking: false, diving: false, tumbling: false, walk: 0, walkPhase: 0, floating: false, yawRate: 0, speed: 0 };
 const STEP_HZ = 60;
 const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** Beyond this (m from the camera) a person is not posed or drawn. */
+const PEOPLE_RANGE = 320;
+/** Splats that people are wearing at once (three blobs each); the oldest goes when another lands. */
+const WORN_SPLATS = 24;
+/** Scratch for posing people: one object, rewritten for each. */
+const POSE: FigurePose = { anim: 'idle', phase: 0, moving: false, running: false, time: 0, headYaw: 0, headPitch: 0, mug: false, capOff: false };
+
+interface WornSplat {
+  fig: Figure;
+  /** Three blobs: offset on the cap (x, z) and radius. */
+  blobs: number[];
+}
 
 /** One flattened blob of a splat; four make a splat. Shared by every mission view. */
 const SPLAT_GEO = shared(new THREE.SphereGeometry(1, 8, 4));
@@ -350,8 +364,12 @@ export class MissionView {
   readonly group = new THREE.Group();
   private readonly props = new Map<Prop, THREE.Object3D>();
   private readonly items = new Map<Item, { obj: THREE.Object3D; glint?: THREE.Mesh }>();
+  /** Everybody (guards, the others, the parade) is one mesh: one draw call a pass. */
+  private readonly cast: Cast;
   private readonly figures = new Map<Guard | Npc, Figure>();
   private readonly marchFigs = new Map<Marcher, Figure>();
+  /** A boat the mission moves but does not list as a prop (the crabber two gulls follow in Mission 1). */
+  private wakeBoat?: { obj: THREE.Object3D; track: { pos: V3; vel?: V3 }; yaw: number };
   /** The Bomber Wing (the first slots) and the town's other gulls, one draw call for all of them. */
   private readonly flock: GullFlock;
   private readonly ambientSlot = new Map<string, number>();
@@ -365,8 +383,11 @@ export class MissionView {
   private readonly cones = new Map<Guard, THREE.Mesh>();
   private readonly poops: THREE.Mesh[] = [];
   private readonly caps: THREE.Object3D[] = [];
-  /** Splats on people's caps (small meshes that move with them). */
-  private readonly hatSplats: THREE.Object3D[] = [];
+  /** Splats on people's caps: one instanced mesh, placed on each cap every frame. */
+  private readonly worn: WornSplat[] = [];
+  private readonly wornMesh: THREE.InstancedMesh;
+  private readonly wm = new THREE.Matrix4();
+  private readonly wm2 = new THREE.Matrix4();
   /** Splats on the ground and roofs: one instanced mesh, four blobs a splat, in metres above datum. */
   private readonly splatMesh: THREE.InstancedMesh;
   private readonly splatHolder = new THREE.Group();
@@ -396,24 +417,41 @@ export class MissionView {
       this.items.set(it, { obj, glint });
       this.group.add(obj);
     }
+    // The people: one cast, in the order guards, others, parade.
+    const looks: FigureLook[] = [];
+    for (const g of mission.guards) looks.push(lookFor(g.id, g.style));
+    for (const n of mission.npcs) looks.push(lookFor(n.id, n.style));
+    for (const mm of mission.marchers) looks.push(lookFor(mm.id, 'marcher'));
+    this.cast = new Cast(looks);
+    this.group.add(this.cast.mesh);
+    let k = 0;
     for (const g of mission.guards) {
-      const f = new Figure(g.style as FigureStyle);
-      this.figures.set(g, f);
-      this.group.add(f.root);
+      this.figures.set(g, this.cast.figures[k++]!);
       const cone = coneMesh(g.viewRange, g.fovDeg);
       cone.visible = false;
       this.cones.set(g, cone);
       this.group.add(cone);
     }
     for (const n of mission.npcs) {
-      const f = new Figure(n.style as FigureStyle);
-      this.figures.set(n, f);
-      this.group.add(f.root);
+      this.figures.set(n, this.cast.figures[k++]!);
+      // Somebody sitting where the mission has put nothing to sit on gets a crate.
+      if (n.anim === 'sit' && !mission.props.some((p) => p.kind === 'bench' && Math.hypot(p.pos.e - n.pos.e, p.pos.n - n.pos.n) < 1.2)) {
+        const crate = add(this.group, new THREE.BoxGeometry(0.46, 0.46, 0.42), MAT.wood);
+        this.toScene(n.pos.e - Math.sin(n.yaw) * 0.06, n.pos.n - Math.cos(n.yaw) * 0.06, n.pos.h + 0.23, crate.position);
+        crate.rotation.y = -n.yaw;
+      }
     }
-    for (const mm of mission.marchers) {
-      const f = new Figure('soldier', { rifle: true });
-      this.marchFigs.set(mm, f);
-      this.group.add(f.root);
+    for (const mm of mission.marchers) this.marchFigs.set(mm, this.cast.figures[k++]!);
+    this.wornMesh = new THREE.InstancedMesh(SPLAT_GEO, MAT.poop, WORN_SPLATS * 3);
+    this.wornMesh.count = 0;
+    this.wornMesh.frustumCulled = false;
+    this.wornMesh.name = 'worn-splats';
+    this.group.add(this.wornMesh);
+    const track = (mission as unknown as { watch?: { wake?: { pos?: V3; vel?: V3 } } }).watch?.wake;
+    if (track?.pos) {
+      const obj = buildProp({ id: 'wake-boat', kind: 'crabber', pos: track.pos, yaw: 0, data: { name: 'KINGFISHER', colour: 0x2f5d4a } });
+      this.group.add(obj);
+      this.wakeBoat = { obj, track: track as { pos: V3; vel?: V3 }, yaw: 0 };
     }
     const wing = mission.allies.length;
     this.flock = new GullFlock(wing + AMBIENT_MAX);
@@ -450,25 +488,17 @@ export class MissionView {
     if (e.type !== 'splat') return;
     const r0 = e.size;
     const guard = e.guard ? this.mission.guards.find((g) => g.id === e.guard) : undefined;
-    const fig = guard ? this.figures.get(guard) : undefined;
+    const fig = (guard ? this.figures.get(guard) : undefined) ?? this.hitFigure(e.at);
     if (fig) {
-      const s = new THREE.Group();
-      for (let i = 0; i < 3; i++) {
-        const r = r0 * (i === 0 ? 0.35 : 0.12 + Math.random() * 0.1);
-        const m = new THREE.Mesh(SPLAT_GEO, MAT.poop);
-        m.scale.set(r, r * 0.18, r);
-        if (i > 0) {
-          const a = Math.random() * Math.PI * 2;
-          const d = r0 * (0.3 + Math.random() * 0.25);
-          m.position.set(Math.cos(a) * d, 0, Math.sin(a) * d);
-        }
-        s.add(m);
+      // On his cap, and it stays there: three blobs that go where he goes.
+      const blobs: number[] = [(Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.06, r0 * 0.35];
+      for (let i = 0; i < 2; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const d = r0 * (0.3 + Math.random() * 0.25);
+        blobs.push(blobs[0]! + Math.cos(a) * d, blobs[1]! + Math.sin(a) * d, r0 * (0.12 + Math.random() * 0.1));
       }
-      fig.hat.add(s);
-      s.position.set((Math.random() - 0.5) * 0.08, 0.07, (Math.random() - 0.5) * 0.08);
-      s.scale.setScalar(0.5);
-      this.hatSplats.push(s);
-      if (this.hatSplats.length > 24) this.hatSplats.shift()!.removeFromParent();
+      this.worn.push({ fig, blobs });
+      if (this.worn.length > WORN_SPLATS) this.worn.shift();
       return;
     }
     // On the surface hit: four flattened blobs, written into the instanced mesh (the oldest are overwritten).
@@ -493,6 +523,14 @@ export class MissionView {
     this.splatMesh.instanceMatrix.needsUpdate = true;
   }
 
+  /** The marcher or bystander whose head a drop landed on, if it landed on one (guards are named by the event). */
+  private hitFigure(at: V3): Figure | undefined {
+    const m = this.mission;
+    for (const mm of m.marchers) if (Math.hypot(mm.pos.e - at.e, mm.pos.n - at.n) < 0.75 && at.h > mm.pos.h + 0.9 && at.h < mm.pos.h + 2.2) return this.marchFigs.get(mm);
+    for (const n of m.npcs) if (Math.hypot(n.pos.e - at.e, n.pos.n - at.n) < 0.6 && at.h > n.pos.h + 0.9 && at.h < n.pos.h + 2.2) return this.figures.get(n);
+    return undefined;
+  }
+
   /**
    * Show everything this view can ever draw (vision cones, markers, glints) so the renderer can compile their
    * shaders ahead of time; call the function it returns to put things back.
@@ -506,10 +544,13 @@ export class MissionView {
       }
     });
     const count = this.splatMesh.count;
+    const worn = this.wornMesh.count;
     this.splatMesh.count = Math.max(1, count);
+    this.wornMesh.count = Math.max(1, worn);
     return () => {
       for (const o of hidden) o.visible = false;
       this.splatMesh.count = count;
+      this.wornMesh.count = worn;
     };
   }
 
@@ -530,6 +571,7 @@ export class MissionView {
     for (const mm of m.marchers) keep(mm, mm.yaw);
     for (const a of m.allies) keep(a, a.yaw);
     for (const a of m.ambient) keep(a, a.yaw);
+    if (this.wakeBoat) keep(this.wakeBoat.track);
     for (const p of m.poops) keep(p);
     for (const t of m.thrown) keep(t);
     for (const it of m.items) if (it.state === ItemState.Loose) keep(it, it.yaw);
@@ -575,7 +617,8 @@ export class MissionView {
       }
     }
     for (const [it, { obj, glint }] of this.items) {
-      const shown = it.state !== ItemState.Consumed;
+      // Eaten, or gone into the courier's satchel.
+      const shown = it.state !== ItemState.Consumed && it.state !== ItemState.Taken;
       obj.visible = shown;
       if (!shown) {
         if (glint) glint.visible = false;
@@ -594,10 +637,8 @@ export class MissionView {
       } else if (it.state === ItemState.CarriedByGuard) {
         const g = m.guards.find((x) => x.carrying === it);
         const f = g && this.figures.get(g);
-        if (f) {
-          f.handR.updateWorldMatrix(true, false);
-          obj.position.setFromMatrixPosition(f.handR.matrixWorld);
-        } else this.toScene(it.pos.e, it.pos.n, it.pos.h, obj.position);
+        if (f) obj.position.copy(f.hand);
+        else this.toScene(it.pos.e, it.pos.n, it.pos.h, obj.position);
         obj.rotation.set(0, -it.yaw, 0);
       } else {
         this.at(it, it.state === ItemState.Loose ? alpha : 1, obj.position);
@@ -611,31 +652,91 @@ export class MissionView {
         glint.rotation.y = this.t * 2;
       }
     }
+    const P = POSE;
+    const pos = this.sv;
+    const far2 = PEOPLE_RANGE * PEOPLE_RANGE;
     for (const [who, f] of this.figures) {
       const isGuard = 'routine' in who;
-      const pos = this.at(who, alpha);
+      this.at(who, alpha, pos);
+      const near = camera.position.distanceToSquared(pos) < far2;
+      if (!near) f.hide();
       if (isGuard) {
         const g = who as Guard;
-        f.pose(pos, this.yawAt(g, g.bodyYaw, alpha), { anim: g.anim, phase: g.phase, moving: g.moving, running: g.runningNow, time: g.time, headYaw: g.headYaw, headPitch: g.headPitch });
-        f.mug.visible = g.mugInHand;
+        const yaw = this.yawAt(g, g.bodyYaw, alpha);
+        if (near) {
+          P.anim = g.anim;
+          P.phase = g.phase;
+          P.moving = g.moving;
+          P.running = g.runningNow;
+          P.time = g.time;
+          P.headYaw = g.headYaw;
+          P.headPitch = g.headPitch;
+          P.mug = g.mugInHand;
+          P.capOff = false;
+          f.pose(pos, yaw, P, dt);
+        }
         const cone = this.cones.get(g)!;
-        const near = camera.position.distanceTo(pos) < 140;
-        cone.visible = g.tagged && near;
+        cone.visible = g.tagged && camera.position.distanceToSquared(pos) < 140 * 140;
         if (cone.visible) {
           cone.position.copy(pos).add(v.set(0, 0.08, 0));
-          cone.rotation.y = -(this.yawAt(g, g.bodyYaw, alpha) + g.headYaw);
+          cone.rotation.y = -(yaw + g.headYaw);
           (cone.material as THREE.MeshBasicMaterial).color.set(CONE_COLOURS[g.state] ?? 0xffffff);
           const r = g.viewRange * (g.alarmTimer > 0 ? 1.25 : 1);
           cone.scale.setScalar(r / g.viewRange);
         }
-      } else {
+      } else if (near) {
         const n = who as Npc;
-        f.pose(pos, this.yawAt(n, n.yaw, alpha), { anim: n.anim, phase: n.phase, moving: n.moving, running: false, time: n.phase, headYaw: n.headYaw, headPitch: n.headPitch });
+        P.anim = n.anim;
+        P.phase = n.phase;
+        P.moving = n.moving;
+        // Sent for in a hurry, he runs.
+        P.running = n.moving && this.motion(n, n.yaw).flat > 2.6;
+        P.time = n.phase;
+        P.headYaw = n.headYaw;
+        P.headPitch = n.headPitch;
+        P.mug = false;
+        P.capOff = false;
+        f.pose(pos, this.yawAt(n, n.yaw, alpha), P, dt);
       }
     }
     for (const [mm, f] of this.marchFigs) {
-      f.pose(this.at(mm, alpha), this.yawAt(mm, mm.yaw, alpha), { anim: mm.anim, phase: mm.phase, moving: mm.moving, running: mm.running, time: this.t + mm.slot.x, headYaw: 0, headPitch: 0 });
-      f.hat.visible = !mm.capOff;
+      this.at(mm, alpha, pos);
+      if (camera.position.distanceToSquared(pos) > far2) {
+        f.hide();
+        continue;
+      }
+      P.anim = mm.anim;
+      P.phase = mm.phase;
+      P.moving = mm.moving;
+      P.running = mm.running;
+      P.time = this.t + mm.slot.x;
+      P.headYaw = 0;
+      P.headPitch = 0;
+      P.mug = false;
+      P.capOff = mm.capOff;
+      f.pose(pos, this.yawAt(mm, mm.yaw, alpha), P, dt);
+    }
+    this.cast.commit();
+    // What they are wearing of ours: on each cap, wherever it now is.
+    let w = 0;
+    for (const splat of this.worn) {
+      const top = capTop(splat.fig.look);
+      for (let i = 0; i < 9; i += 3) {
+        const r = splat.blobs[i + 2]! * 0.5;
+        this.wm2.makeScale(r, r * 0.2, r).setPosition(splat.blobs[i]!, top, splat.blobs[i + 1]!);
+        this.wornMesh.setMatrixAt(w++, this.wm.multiplyMatrices(splat.fig.hatMatrix, this.wm2));
+      }
+    }
+    if (w || this.wornMesh.count) {
+      this.wornMesh.count = w;
+      this.wornMesh.instanceMatrix.needsUpdate = true;
+    }
+    if (this.wakeBoat) {
+      const b = this.wakeBoat;
+      const tv = b.track.vel;
+      if (tv && Math.hypot(tv.e, tv.n) > 0.2) b.yaw = Math.atan2(tv.e, tv.n);
+      this.at(b.track, alpha, b.obj.position);
+      b.obj.rotation.y = -b.yaw;
     }
     this.syncFlock(dt, camera, alpha);
     // Falling poop.
@@ -717,6 +818,7 @@ export class MissionView {
     const pos = this.sv;
     a.braking = a.diving = a.tumbling = a.floating = false;
     a.calling = false;
+    a.roll = undefined;
     a.walk = 0;
     a.walkPhase = 0;
     for (let i = 0; i < m.allies.length; i++) {
@@ -766,13 +868,14 @@ export class MissionView {
       a.floating = false;
       a.walk = 0;
       let pitch = 0;
+      a.roll = undefined;
       if (g.airborne) {
         a.yawRate = mo.yawRate;
+        a.roll = g.bank;
         a.speed = mo.speed || 11;
-        pitch = Math.atan2(mo.climb, Math.max(1, mo.flat)) * 0.6;
+        pitch = (g.pitch ?? Math.atan2(mo.climb, Math.max(1, mo.flat))) * 0.6;
       } else {
-        // Standing or afloat. Its place is the middle of its 0.3 m ball, as the player's gull's is, or (if it was
-        // given the spot it stands on) its feet: either way the feet go on what is under it.
+        // Standing or afloat.
         // (Worked out when it moves, not every frame.)
         const f = slot * 4;
         if (!(Math.abs(this.footing[f]! - g.pos.e) + Math.abs(this.footing[f + 1]! - g.pos.n) + Math.abs(this.footing[f + 2]! - g.pos.h) < 0.01)) {
@@ -780,7 +883,9 @@ export class MissionView {
           this.footing[f] = g.pos.e;
           this.footing[f + 1] = g.pos.n;
           this.footing[f + 2] = g.pos.h;
-          this.footing[f + 3] = g.pos.h - under.h > 0.15 ? g.pos.h - 0.3 : g.pos.h;
+          // Its place is its middle, STAND above its feet; within reach of something under it, the feet go on that.
+          const feetAt = g.pos.h - STAND;
+          this.footing[f + 3] = Math.abs(feetAt - under.h) < 0.3 ? under.h : feetAt;
           this.afloat[slot] = under.water && this.footing[f + 3]! < world.waterLevel + 0.2 ? 1 : 0;
         }
         const feet = this.footing[f + 3]!;
@@ -788,8 +893,8 @@ export class MissionView {
         this.at(g, alpha, pos, feet - g.pos.h + (a.floating ? 0.06 : 0.17));
         a.yawRate = 0;
         a.speed = mo.flat;
-        a.walk = a.floating ? 0 : Math.min(1, mo.flat / 1.2);
-        this.walkPhase[slot] = (this.walkPhase[slot]! + dt * mo.flat * 1.6) % 1;
+        a.walk = a.floating ? 0 : g.walking === undefined ? Math.min(1, mo.flat / 1.2) : g.walking ? 1 : 0;
+        this.walkPhase[slot] = g.walkPhase === undefined ? (this.walkPhase[slot]! + dt * mo.flat * 1.6) % 1 : g.walkPhase / (Math.PI * 2);
       }
       a.walkPhase = this.walkPhase[slot]!;
       flock.place(slot, pos, this.yawAt(g, g.yaw, alpha), pitch, a, dt);
@@ -806,6 +911,7 @@ export class MissionView {
   }
 
   dispose(): void {
+    this.cast.dispose();
     this.flock.dispose();
     this.group.removeFromParent();
     // Geometries, this mission's own materials and its canvas textures (name plates, banners); shared ones stay.
