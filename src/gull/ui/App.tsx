@@ -23,7 +23,7 @@ export function App({ game }: { game: GullGame }) {
   }, [game]);
   const playing = st.screen === 'playing';
   return (
-    <div className="gb-root">
+    <main className="gb-root">
       <div ref={host} className="gb-canvas" />
       {/* At the Ready gate there is the scene and one card: the HUD comes up with control. */}
       {playing && st.gate !== 'ready' && <Hud game={game} st={st} />}
@@ -48,7 +48,7 @@ export function App({ game }: { game: GullGame }) {
       {st.screen === 'results' && <ResultsCard game={game} st={st} />}
       {st.screen === 'loading' && <Loading st={st} />}
       {st.screen === 'error' && <ErrorCard st={st} />}
-    </div>
+    </main>
   );
 }
 
@@ -157,7 +157,7 @@ function Title({ game, st }: { game: GullGame; st: GameState }) {
       )}
       {view === 'settings' && (
         <>
-          <SettingsPanel game={game} s={st.settings} />
+          <SettingsPanel game={game} s={st.settings} top />
           <button data-autofocus onClick={() => setView('menu')}>
             Back
           </button>
@@ -463,13 +463,13 @@ function RadioLog({ game }: { game: GullGame }) {
   );
 }
 
-function SettingsPanel({ game, s }: { game: GullGame; s: Settings }) {
+function SettingsPanel({ game, s, top = false }: { game: GullGame; s: Settings; top?: boolean }) {
   const set = (p: Partial<Settings>) => game.updateSettings(p);
   const gfx = game.state.graphics;
   const pct = (v: number) => `${Math.round(v * 100)}%`;
   return (
     <div className="gb-settings">
-      <h3 className="gb-h">Settings</h3>
+      {top ? <h2 className="gb-h">Settings</h2> : <h3 className="gb-h">Settings</h3>}
       <label>
         Graphics
         <select value={gfx} onChange={(e) => game.setGraphicsPreset(e.target.value as GraphicsPreset)}>

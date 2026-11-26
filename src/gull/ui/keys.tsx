@@ -37,7 +37,7 @@ export function ControlsList({ game }: { game: GullGame }) {
     <div className="gb-controls-list">
       {actionGroups().map((g) => (
         <section key={g.title}>
-          <h4 className="gb-h">{g.title}</h4>
+          <h3 className="gb-h">{g.title}</h3>
           <dl>
             {g.ids.map((id) => {
               const labels = TABLE[id]!.kind === 'axis' ? ['Mouse', 'Arrow keys'] : game.input.bindingLabels(id, 'keys');

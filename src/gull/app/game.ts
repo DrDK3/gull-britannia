@@ -598,6 +598,8 @@ export class GullGame {
     if (!this.started) {
       this.started = true;
       m.start();
+      // The coach looks at once, so that the first prompt is up with the first picture.
+      this.coach?.step(0);
       this.drainEvents();
       this.publishHud(m);
     }

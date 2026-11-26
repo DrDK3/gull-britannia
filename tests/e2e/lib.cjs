@@ -16,7 +16,9 @@ async function launch() {
 
 /** Open the game and wait for its title screen. */
 async function openGame(browser, url, viewport = { width: 800, height: 450 }, query = '') {
-  const page = await browser.newPage({ viewport });
+  // In a context of its own (axe opens a second page beside the one it checks, which the default context forbids).
+  const context = await browser.newContext({ viewport });
+  const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   const t0 = Date.now();
@@ -48,13 +50,23 @@ const click = (page, text) => page.click(`button:has-text("${text}")`, { timeout
 
 /**
  * A real mouse click on a button, sent the moment the button exists. (page.click first waits for the element to hold
- * still over two frames, and a frame takes up to a second on a software renderer: fine for a test's steps, not for
- * timing what a player waits for.)
+ * still over two frames, and a frame takes seconds on a software renderer: fine for a test's steps, not for timing
+ * what a player waits for. The page itself answers at once: it is only the drawing that is slow.)
  */
 async function clickNow(page, text, ms = 20000) {
-  const h = await page.waitForFunction((t) => [...document.querySelectorAll('button')].find((b) => b.textContent.includes(t) && !b.disabled), text, { timeout: ms, polling: 20 });
-  const box = await h.asElement().boundingBox();
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  const h = await page.waitForFunction(
+    (t) => {
+      const b = [...document.querySelectorAll('button')].find((el) => el.textContent.includes(t) && !el.disabled);
+      if (!b) return null;
+      b.scrollIntoView({ block: 'nearest' });
+      const r = b.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    },
+    text,
+    { timeout: ms, polling: 20 },
+  );
+  const at = await h.jsonValue();
+  await page.mouse.click(at.x, at.y);
 }
 
 module.exports = { launch, openGame, tally, waitGate, waitScreen, waitFor, click, clickNow };
