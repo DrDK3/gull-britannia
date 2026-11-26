@@ -155,7 +155,9 @@ describe('Mission 2, flown by a pilot with the player’s inputs only', () => {
         expect(r.broken, `${sense} ${JSON.stringify(run)}\n${r.log.join('\n')}`).toBe(true);
       }
     }
-  });
+    // handoff: (stealth) ten flights take 2 to 4 s, and up to 6 s when every test file runs at once on a busy
+    // machine; the default limit of 5 s then fails this test for no fault of the flying.
+  }, 30_000);
 
   it('it is the Wing that does it: the same two drops alone leave the formation standing', () => {
     for (const sense of ['with', 'against'] as const) {
