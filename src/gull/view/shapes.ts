@@ -188,6 +188,19 @@ export function mirrorX<T extends THREE.BufferGeometry>(g: T): T {
   return g;
 }
 
+/** Turn a sheet over: the same surface seen from its other side. */
+export function flip<T extends THREE.BufferGeometry>(g: T): T {
+  const ix = g.index;
+  if (!ix) throw new Error('flip: an indexed geometry is needed');
+  for (let i = 0; i < ix.count; i += 3) {
+    const b = ix.getX(i + 1);
+    ix.setX(i + 1, ix.getX(i + 2));
+    ix.setX(i + 2, b);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 /** Turn (x, y, z order) and then move a geometry; returns it. */
 export function place<T extends THREE.BufferGeometry>(g: T, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0): T {
   if (rx) g.rotateX(rx);

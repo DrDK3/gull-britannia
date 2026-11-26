@@ -6,8 +6,13 @@
  *   gull:carry   the same, with the courier's dispatch in its bill
  *   flock        sixteen of the cheaper gulls as one mesh (the Bomber Wing, Mission.ambient)
  *   viewbill     the first-person bill, as the game's camera sees it
+ *   person:<who> one person: a look from LOOKS in figures.ts (soldier, borovsky, corporal, voronova, grushkov, general,
+ *                clerk, courier, baker, cook, marcher…), posed by any `anim` the game uses, or walk, run, runflail,
+ *                marchhit, sitflail
+ *   cast         the cast in a row as one mesh; cast:action has each doing what they are known for
  */
 import * as THREE from 'three';
+import { Cast, LOOKS, type FigurePose } from '../gull/view/figures';
 import { GullFlock, GullModel, type GullAnim } from '../gull/view/gullModel';
 import { PAL } from '../gull/view/palette';
 
@@ -18,6 +23,8 @@ export interface Subject {
   radius: number;
   advance?(dt: number): void;
   beforeDraw?(camera: THREE.Camera): void;
+  /** For a wide subject: its width and height (m), framed to fit both rather than a sphere. */
+  size?: readonly [number, number];
   /** Draw calls of helpers that are not the model's (taken off the count). */
   overhead?: number;
 }
@@ -181,11 +188,137 @@ function viewBillSubject(): Subject {
   };
 }
 
+// ------------------------------------------------------------------ people
+
+/** A pose name is one of the game's `anim` values, or walk, run, runflail (a panic run) or marchhit. */
+export function figurePose(name: string, t: number): { anim: string; phase: number; moving: boolean; running: boolean; time: number; headYaw: number; headPitch: number } {
+  const cyc = Number.isFinite(t) ? t : 0.2;
+  const time = Number.isFinite(t) ? t : 0.6;
+  const base = { anim: name || 'idle', phase: 0, moving: false, running: false, time, headYaw: 0, headPitch: 0 };
+  switch (name) {
+    case 'walk':
+      return { ...base, anim: 'idle', moving: true, phase: cyc * Math.PI * 2, time: cyc };
+    case 'run':
+      return { ...base, anim: 'idle', moving: true, running: true, phase: cyc * Math.PI * 2, time: cyc };
+    case 'runflail':
+      return { ...base, anim: 'flail', moving: true, running: true, phase: cyc * Math.PI * 2, time: cyc };
+    case 'march':
+      return { ...base, moving: true, phase: cyc * Math.PI * 2, time: cyc };
+    case 'marchhit':
+      return { ...base, anim: 'flail', moving: true, phase: cyc * Math.PI * 2, time: cyc };
+    case 'sitflail':
+      return { ...base, anim: 'flail' };
+    default:
+      return base;
+  }
+}
+
+/** Poses that unfold from the moment they start (a stretch, a throw): the studio's `t` is how long ago that was. */
+const UNFOLDING: Record<string, number> = { stretch: 0.7, throw: 0.1 };
+
+function seatFor(x: number): THREE.Mesh {
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.46, 0.42), new THREE.MeshStandardMaterial({ color: PAL.wood, roughness: 0.9 }));
+  seat.position.set(x, 0.23, 0.06);
+  seat.castShadow = seat.receiveShadow = true;
+  return seat;
+}
+
+/** Pose one figure of a cast for a still: eased poses are settled, unfolding ones run for their time. */
+function settle(cast: Cast, i: number, pos: THREE.Vector3, yaw: number, poseName: string, t: number): FigurePose {
+  const fig = cast.figures[i]!;
+  const p: FigurePose = { ...figurePose(poseName, t) };
+  p.mug = p.anim === 'sip';
+  const unfold = UNFOLDING[p.anim];
+  if (unfold !== undefined) {
+    const run = Number.isFinite(t) ? t : unfold;
+    fig.pose(pos, yaw, { ...p, anim: 'idle' }, 0);
+    const steps = Math.max(1, Math.round(run * 60));
+    p.time = 0;
+    for (let k = 0; k < steps; k++) {
+      p.time += 1 / 60;
+      fig.pose(pos, yaw, p, 1 / 60);
+    }
+  } else if (poseName === 'sitflail') {
+    fig.pose(pos, yaw, { ...p, anim: 'sit' }, 0);
+    fig.pose(pos, yaw, p, 1);
+  } else fig.pose(pos, yaw, p, 0);
+  return p;
+}
+
+/** One person: person:<look> (a name from LOOKS in figures.ts), posed by any of the game's `anim` values. */
+function personSubject(lookId: string, poseName: string, t: number): Subject {
+  const look = LOOKS[lookId || 'soldier'] ?? LOOKS.soldier!;
+  const cast = new Cast([look]);
+  const pos = new THREE.Vector3();
+  const p = settle(cast, 0, pos, 0, poseName, t);
+  cast.commit();
+  const object = new THREE.Group();
+  object.add(cast.mesh);
+  const sitting = p.anim === 'sit' || (p.anim === 'flail' && poseName === 'sitflail');
+  if (sitting) object.add(seatFor(0));
+  const k = look.height / 1.75;
+  return {
+    object,
+    centre: new THREE.Vector3(0, (sitting ? 0.74 : 0.96) * k, 0),
+    radius: 1.12 * k,
+    size: [1.25 * k, (sitting ? 1.75 : 2.2) * k],
+    overhead: sitting ? 2 : 0,
+    advance(dt) {
+      p.time += dt;
+      if (p.moving) p.phase += dt * (p.running ? 9 : 6.5);
+      cast.figures[0]!.pose(pos, 0, p, dt);
+      cast.commit();
+    },
+  };
+}
+
+/** The cast in a row, one mesh: cast (everyone at ease) or cast:action (each doing what they are known for). */
+function castSubject(arg: string): Subject {
+  const who: [look: string, action: string][] = [
+    ['borovsky', 'sip'],
+    ['corporal', 'look_up'],
+    ['voronova', 'read'],
+    ['grushkov', 'outrage'],
+    ['general', 'salute'],
+    ['courier', 'walk'],
+    ['clerk', 'sit'],
+    ['baker', 'shoo'],
+    ['cook', 'stir'],
+    ['soldier2', 'stretch'],
+    ['marcher', 'march'],
+    ['marcher3', 'marchhit'],
+  ];
+  const cast = new Cast(who.map(([id]) => LOOKS[id]!));
+  const object = new THREE.Group();
+  object.add(cast.mesh);
+  const gap = 0.82;
+  const poses: FigurePose[] = [];
+  let seats = 0;
+  who.forEach(([, action], i) => {
+    const x = (i - (who.length - 1) / 2) * gap;
+    const name = arg === 'action' ? action : action === 'sit' ? 'sit' : 'idle';
+    const p = settle(cast, i, new THREE.Vector3(x, 0, 0), 0, name, NaN);
+    if (arg !== 'action' && who[i]![0] === 'borovsky') {
+      p.mug = true;
+      cast.figures[i]!.pose(new THREE.Vector3(x, 0, 0), 0, p, 0);
+    }
+    poses.push(p);
+    if (p.anim === 'sit') {
+      object.add(seatFor(x));
+      seats++;
+    }
+  });
+  cast.commit();
+  return { object, centre: new THREE.Vector3(0, 0.95, 0), radius: (who.length * gap) / 2 + 0.3, size: [who.length * gap + 0.3, 2.2], overhead: seats * 2 };
+}
+
 // ------------------------------------------------------------------ registry
 
 type Maker = (pose: string, t: number, arg: string) => Subject;
 export const SUBJECTS: Record<string, Maker> = {
   gull: (pose, t, arg) => gullSubject(pose || 'glide', t, arg),
+  person: (pose, t, arg) => personSubject(arg, pose, t),
+  cast: (_pose, _t, arg) => castSubject(arg),
   flock: () => flockSubject(),
   viewbill: () => viewBillSubject(),
 };
@@ -203,6 +336,10 @@ export function makeSubject(show: string, pose: string, t: number): Subject {
 
 /** Contact sheets: cells as show|pose@t|view, separated by semicolons. */
 export const SHEETS: Record<string, string> = {
+  // Every gesture the game asks for (the `anim` values of guard.ts, parade.ts, m1.ts, m1watch.ts and m2.ts).
+  'gestures-1': 'person:soldier|idle;person:soldier|attention;person:soldier|walk@0.12;person:soldier|walk@0.38;person:soldier|run@0.2;person:marcher|march@0.25;person:marcher|march@0.75;person:officer|salute;person:borovsky|sip',
+  'gestures-2': 'person:borovsky|stretch;person:borovsky|outrage;person:borovsky|scrub;person:soldier3|shoo;person:corporal|look_up;person:soldier2|look_around;person:voronova|point;person:soldier|throw@0.05;person:soldier|throw@0.35',
+  'gestures-3': 'person:voronova|read;person:clerk|sit;person:clerk|sitflail;person:courier|sit;person:cook|stir;person:marcher2|runflail@0.2;person:marcher3|marchhit@0.3;person:grushkov|flail;person:baker|shoo',
   'gull-views': 'gull|glide|three;gull|glide|side;gull|glide|front;gull|glide|top;gull|glide|rear;gull|glide|below;gull|stand|side;gull|stand|three;gull|stand|front;gull|stand|rear;gull|glide|chase;gull|glide|far',
   'gull-air': 'gull|glide;gull|flap@0.25;gull|flap@0.45;gull|flap@0.65;gull|flap@0.8;gull|flap@0.95;gull|bank;gull|brake;gull|dive;gull|tumble',
   'gull-ground': 'gull|stand;gull|walk@0.1;gull|walk@0.35;gull|look;gull|shuffle;gull|preen;gull|stretch;gull|float;gull|eat;gull|call;gull|turn',
