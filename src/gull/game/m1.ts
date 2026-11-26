@@ -17,6 +17,7 @@
 import { Guard, GuardState } from './guard';
 import type { Perch } from './gull';
 import type { Item } from './items';
+import { M1Watch } from './m1watch';
 import { Mission, type DropPoint, type MissionConditions, type Npc, type PoopTarget, type Prop } from './mission';
 import { v3, type World } from './world';
 
@@ -56,6 +57,8 @@ export const M1 = {
   barrel: { e: -315.2, n: 54.2 },
   river: { e: -312.6, n: 66.5 },
   fortEnd: { e: -302.5, n: 31 },
+  /** The fort side of the sentry's round: the corner by the bakery, where he looks down the cove. */
+  corner: { e: -310.5, n: 47.5 },
   pump: { e: -319.6, n: 74.5 },
   kitchen: { e: -331.5, n: 77.5 },
   laneFoot: { e: -317.5, n: 71.5 },
@@ -80,6 +83,8 @@ export class Mission1 extends Mission {
   mug!: Prop;
   mugTarget!: PoopTarget;
   private teaSpilled = false;
+  /** The baker, the corporal, the courier and his clock (m1watch.ts). */
+  watch!: M1Watch;
   private hintTimer = 0;
   lunchDone = false;
   delivered = false;
@@ -198,14 +203,23 @@ export class Mission1 extends Mission {
 
     // Private Borovsky.
     const s = new Guard('borovsky', 'Pte. Borovsky', this, this.rng);
-    s.routineText = 'post · tea · river · fort';
     s.area = M1.sentryArea;
+    // His round. On a `watch` step his eyes are on the table (walking to it too); on the others his back is to it.
+    // The two away steps are the windows: about 11 s at the river wall and about 9 s at the bakery corner, each
+    // ended by a tell (a stretch and a line) a second and a half before he turns. Between them he is never away for
+    // more than twelve seconds, nor for less than six: long enough to commit to, short enough to get wrong.
+    const teaSpot = { e: M1.post.e - 0.3, n: M1.post.n - 1.3 };
+    const toTable = (from: { e: number; n: number }) => Math.atan2(tb.e - from.e, tb.n - from.n);
     s.routine = [
-      { ...M1.post, yaw: WEST, wait: 8, anim: 'idle', say: 'All quiet. As ordered.' },
-      { e: M1.post.e - 0.3, n: M1.post.n - 1.3, yaw: -2.4, wait: 4.5, anim: 'sip', say: 'Ahh. Tea.' },
-      { ...M1.river, yaw: EAST, wait: 9, anim: 'idle', say: 'Boats. Water. More boats.' },
-      { ...M1.fortEnd, yaw: SOUTH + 0.25, wait: 9, anim: 'idle', say: 'Beautiful. Like Odessa, but wetter.' },
+      { ...M1.post, yaw: WEST, wait: 4, anim: 'idle', say: 'All quiet. As ordered.', label: 'post', watch: true },
+      { ...teaSpot, yaw: toTable(teaSpot), wait: 4, anim: 'sip', say: 'Ahh. Tea.', label: 'tea', watch: true },
+      { ...M1.river, yaw: EAST, wait: 5, anim: 'idle', say: 'Boats. Water. More boats.', label: 'river wall', tell: { before: 1.6, say: 'Hm. The table.', anim: 'stretch' } },
+      { ...M1.river, yaw: toTable(M1.river), wait: 2.5, anim: 'idle', label: 'looks back', watch: true },
+      { ...M1.post, yaw: WEST, wait: 2, anim: 'idle', label: 'post', watch: true },
+      { ...M1.corner, yaw: SOUTH + 0.25, wait: 3, anim: 'idle', say: 'Beautiful. Like Odessa, but wetter.', label: 'fort side', tell: { before: 1.5, say: 'Back to it.', anim: 'stretch' } },
+      { ...M1.corner, yaw: toTable(M1.corner), wait: 2.5, anim: 'idle', label: 'looks back', watch: true },
     ];
+    s.routineText = s.routineLabels().join(' · ');
     s.postStep = 0;
     s.distractions = {
       uniform: [
@@ -222,6 +236,9 @@ export class Mission1 extends Mission {
     };
     this.sentry = this.addGuard(s);
     s.guardedItem = this.dispatch;
+    // Everyone else on the cove, the courier's clock and what the alert ladder does: m1watch.ts.
+    this.watch = new M1Watch(this, M1);
+    this.director = this.watch;
 
     // His tea, on the barrel by his post: a small but tempting target.
     const br = M1.barrel;

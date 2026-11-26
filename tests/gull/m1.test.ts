@@ -75,11 +75,13 @@ describe('Mission 1 on Bayard’s Cove', () => {
     const s = m.sentry;
     const seen = new Set<number>();
     m.gull.spawn(v3(M1.customChimney.e, M1.customChimney.n, 14.8), Math.PI / 2);
-    run(m, 40, {}, () => {
+    // (His round is seven steps and 51 s now: post, tea, river wall, a look back, post, the fort side, a look back.)
+    run(m, 55, {}, () => {
       seen.add(s.stepIndex());
       return false;
     });
-    expect(seen.size).toBe(4);
+    expect(seen.size).toBe(7);
+    expect(seen.size).toBe(s.routine.length);
     expect(s.state).toBe(GuardState.Routine);
     expect(m.stats.spotted).toBe(0);
   });
@@ -122,7 +124,9 @@ describe('Mission 1 on Bayard’s Cove', () => {
     expect(line('Dispatch delivered')).toBe(500);
     expect(line('Stealth')).toBe(300);
     expect(line('Clean escape')).toBe(200);
-    expect(r!.grade).toMatch(/^[AB]/);
+    // Unseen, unsuspected and no hits: the approach the review rates highest (scoring.ts), and the top grade.
+    expect(line('Approach: Ghost')).toBe(400);
+    expect(r!.grade).toBe('A+');
   });
 
   it('tea route: a poop in his tea sends him up the lane, and the table is unwatched', () => {

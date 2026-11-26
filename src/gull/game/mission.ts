@@ -140,6 +140,31 @@ export interface Results {
   alertPeak: string;
 }
 
+/**
+ * A mission's stealth script, kept in a file of its own beside the mission (m1watch.ts): the extra watchers, the
+ * clock, and what each rung of the alert ladder does to the level. The mission installs one in `setup`
+ * (`this.director = …`) and the base class calls it.
+ */
+export interface StealthDirector {
+  tick?(dt: number): void;
+  onAlertLevel?(level: AlertLevelId, prev: AlertLevelId): void;
+  onAlertTop?(): void;
+  onItemUncovered?(it: Item): void;
+  /** The debrief and the Committee's remarks when the operation was compromised. */
+  compromisedDebrief?(): string;
+  compromisedRemarks?(): string[];
+}
+
+/** A clock from the fiction: something happens at `at` seconds of mission time (the courier is back from lunch). */
+export interface Deadline {
+  /** What the clock is, for a HUD label: "Courier back". */
+  label: string;
+  /** The time by the town's clocks when it happens: "13.30". */
+  clock: string;
+  /** Mission time (s) when it happens. A director may bring it forward. */
+  at: number;
+}
+
 /** Someone who may be taking an interest in the gull: where he is from the gull, and how much he cares. */
 export interface Noticer {
   id: string;
@@ -255,6 +280,10 @@ export abstract class Mission implements GullHost, GuardHost {
   /** Seconds Scrumpy has sat alone near something guarded. */
   loiter = 0;
   outcome: 'complete' | 'compromised' = 'complete';
+  /** The mission's stealth script, if it has one. */
+  director: StealthDirector | undefined;
+  /** A clock from the fiction, if the mission has one: the HUD may show `deadlineLeft`. */
+  deadline: Deadline | undefined;
   /** The most a payload can earn in this operation (scoring.ts). */
   ordnanceCap = ORDNANCE_CAP;
   poops: Poop[] = [];
@@ -342,11 +371,22 @@ export abstract class Mission implements GullHost, GuardHost {
     return false;
   }
   /** The alert ladder moved from `prev` to `level`: change the level to match. */
-  protected onAlertLevel(_level: AlertLevelId, _prev: AlertLevelId): void {}
+  protected onAlertLevel(level: AlertLevelId, prev: AlertLevelId): void {
+    this.director?.onAlertLevel?.(level, prev);
+  }
   /** The alert ladder reached the top (once). */
-  protected onAlertTop(): void {}
+  protected onAlertTop(): void {
+    this.director?.onAlertTop?.();
+  }
   /** A covered item had its weight knocked off. */
-  protected onItemUncovered(_it: Item): void {}
+  protected onItemUncovered(it: Item): void {
+    this.director?.onItemUncovered?.(it);
+  }
+
+  /** Seconds until the mission's clock runs out, or undefined if it has none. */
+  get deadlineLeft(): number | undefined {
+    return this.deadline ? Math.max(this.deadline.at - this.elapsed, 0) : undefined;
+  }
   protected resultLines(): [string, number][] {
     return [];
   }
@@ -363,7 +403,7 @@ export abstract class Mission implements GullHost, GuardHost {
   gradeBands(): GradeBand[] {
     return [
       [1450, 'A+', 'Distinguished Gull Cross'],
-      [1150, 'A', 'Exemplary'],
+      [1250, 'A', 'Exemplary'],
       [850, 'B', 'Satisfactory'],
       [550, 'C', 'Adequate, with Reservations'],
       [0, 'D', 'Under Review'],
@@ -563,6 +603,7 @@ export abstract class Mission implements GullHost, GuardHost {
         if (n.speech.t <= 0) n.speech = undefined;
       }
     }
+    this.director?.tick?.(dt);
     this.tick(dt);
     if (this.finishTimer > 0) {
       this.finishTimer -= dt;
@@ -1456,10 +1497,10 @@ export abstract class Mission implements GullHost, GuardHost {
       total,
       grade,
       gradeTitle,
-      remarks: [...this.baseRemarks(), ...this.remarks()],
+      remarks: compromised ? [...this.baseRemarks(), ...(this.director?.compromisedRemarks?.() ?? [])] : [...this.baseRemarks(), ...this.remarks()],
       time: this.elapsed,
       stats: JSON.parse(JSON.stringify(this.stats)) as MissionStats,
-      debrief: this.debriefText(),
+      debrief: compromised ? (this.director?.compromisedDebrief?.() ?? this.debriefText()) : this.debriefText(),
       outcome: this.outcome,
       approach,
       alertPeak: this.alert.peakName,

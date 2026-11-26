@@ -510,11 +510,12 @@ export class Mission2 extends Mission {
   }
 
   override gradeBands(): [number, string, string][] {
+    // With the approach marked (scoring.ts): A+ is a Ghost with a proper strike, A is unseen, B was seen.
     return [
-      [1650, 'A+', 'Distinguished Gull Cross (with Bar)'],
-      [1300, 'A', 'Exemplary'],
-      [950, 'B', 'Satisfactory'],
-      [650, 'C', 'Adequate, with Reservations'],
+      [2050, 'A+', 'Distinguished Gull Cross (with Bar)'],
+      [1700, 'A', 'Exemplary'],
+      [1300, 'B', 'Satisfactory'],
+      [900, 'C', 'Adequate, with Reservations'],
       [0, 'D', 'Under Review'],
     ];
   }

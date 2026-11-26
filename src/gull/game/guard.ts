@@ -935,7 +935,8 @@ export class Guard {
     // Has the thing he guards gone missing?
     const gi = this.guardedItem;
     if (gi && !this.discoveredTheft && (s === GuardState.Routine || s === GuardState.Return || s === GuardState.Suspicious || s === GuardState.Investigate)) {
-      if (gi.state !== ItemState.Placed && gi.state !== ItemState.CarriedByGuard) {
+      // (Taken: it left with its owner, which is no theft.)
+      if (gi.state !== ItemState.Placed && gi.state !== ItemState.CarriedByGuard && gi.state !== ItemState.Taken) {
         const home = gi.home.pos;
         if (dist(eye, home) < 13 && inView(home) && this.host.lineOfSight(eye, v3(home.e, home.n, home.h + 0.3))) {
           this.discoveredTheft = true;
