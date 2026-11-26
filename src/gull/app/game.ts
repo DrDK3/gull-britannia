@@ -41,11 +41,11 @@ import { captureHeights, type CaptureArea } from '../view/heightCapture';
 import { MissionView } from '../view/missionView';
 import { GameAudio } from './audio';
 import { BRIEFINGS, OPERATIONS, type Briefing } from './briefings';
-import { InputMap, isPad, loadBindings, readPad, saveBindings, type Device, type InputProfile } from './input';
+import { InputMap, loadBindings } from './input';
 import { placeBox, type Box } from './labels';
 import { MessageBus, type MessageView, type RadioPriority } from './messages';
 import { loadProgress, saveProgress, type Progress } from './progress';
-import { DEFAULT_SETTINGS, TABS, loadSettings, saveSettings, type Settings, type SettingsTab } from './settings';
+import { loadSettings, saveSettings, type Settings } from './settings';
 
 const DT = 1 / 60;
 const MAX_STEPS = 6;
@@ -61,8 +61,8 @@ export const CAPTURE_AREAS: CaptureArea[] = [
 export type Screen = 'loading' | 'title' | 'briefing' | 'playing' | 'results' | 'error';
 /** While playing: waiting for the player to take control, in control, or in the pause menu. */
 export type Gate = 'ready' | 'flying' | 'paused';
-/** How the player steers (input.ts): the captured mouse, the arrow keys, the pointer's position, or a gamepad. */
-export type InputMode = InputProfile;
+/** How the player steers: the mouse (captured) with the keyboard, or the keyboard alone (arrow keys look). */
+export type InputMode = 'mouse' | 'keys';
 /** The pause menu's pages. */
 export type PauseTab = 'orders' | 'controls' | 'log' | 'settings';
 
@@ -80,8 +80,10 @@ export interface HudState {
   beak?: string;
   /** The beak holds the operation's papers: a gull that guards look at twice. */
   beakIsMission?: boolean;
-  /** The current order's marker: how far away it is (m), what it is called if it has a name, and whether it is in view. */
-  objective?: { distance: number; name?: string; inView: boolean };
+  /** How far away the current order's marker is (m), when it has one. */
+  distance?: number;
+  /** The marker's direction when it is off screen (rad, 0 = up, clockwise). */
+  offscreen?: number;
 }
 
 export interface GuardOverlay {
@@ -129,11 +131,7 @@ export interface GameState {
   tension: number;
   /** What the message bus has on show: radio, prompt, change of orders, toasts, alert or banner. */
   msg: MessageView;
-  /** Whose labels prompts show: the keyboard and mouse, or the gamepad (whichever was used last). */
-  device: Device;
-  /** A gamepad is connected. */
-  padConnected: boolean;
-  /** Goes up whenever a binding changes, so that labels are drawn again. */
+  /** Goes up whenever the labels of bindings change, so that they are drawn again. */
   bindingsRev: number;
   /** Which page the pause menu opens on. */
   pauseTab: PauseTab;
@@ -148,7 +146,6 @@ export interface GameState {
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
 const ACTION_TABLE: Record<string, ActionInfo> = ACTIONS;
-const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export class GullGame {
   view?: GullScene;
@@ -186,15 +183,8 @@ export class GullGame {
 
   private readonly listeners = new Set<() => void>();
   private st: GameState;
-  /** Arrow keys held: they turn the view in every profile. */
+  /** Arrow keys held: they turn the view, with the mouse or without it. */
   private readonly arrows = new Set<string>();
-  /** The pointer's place over the picture (−1…1 each way, y down) in the trackpad profile; undefined when it is away. */
-  private pointer: { x: number; y: number } | undefined;
-  /** Gamepad: the buttons down at the last poll, and the stick. */
-  private padDown = new Set<string>();
-  private padStick = { x: 0, y: 0 };
-  /** The Settings panel is waiting for a gamepad button to bind. */
-  private padCapture: ((code: string) => void) | undefined;
   private accumulator = 0;
   private lastFrame = 0;
   private raf = 0;
@@ -236,7 +226,7 @@ export class GullGame {
       loaded: 0.05,
       issues: [],
       gate: 'ready',
-      inputMode: this.settings.profile,
+      inputMode: 'mouse',
       captureRefused: 0,
       locked: false,
       paused: false,
@@ -251,8 +241,6 @@ export class GullGame {
       score: 0,
       tension: 0,
       msg: this.messages.view,
-      device: 'keys',
-      padConnected: false,
       bindingsRev: 0,
       pauseTab: 'orders',
       overlays: [],
@@ -264,14 +252,12 @@ export class GullGame {
     ring.renderOrder = 5;
     ring.visible = false;
     this.dropRing = ring;
-    this.input.profile = this.settings.profile;
     // Lines are timed by what the player reads: the binding's label, not the {token}.
     this.messages.measure = (text) => formatActions(text, this.label).length;
-    this.messages.pace = this.settings.radioPace;
     void this.readKeyboardLayout();
   }
 
-  /** The label of an action's binding on the device in hand ("Space", "Right mouse", "A"). */
+  /** The label of an action's current binding ("Space", "Right mouse"). */
   readonly label = (id: ActionId): string => this.input.label(id);
 
   /** Where the browser can say what each key prints on this keyboard (AZERTY: the W key is Z), label by that. */
@@ -514,8 +500,6 @@ export class GullGame {
   private releaseInput(): void {
     this.input.releaseAll();
     this.arrows.clear();
-    this.padDown.clear();
-    this.padStick = { x: 0, y: 0 };
   }
 
   private endMission(): void {
@@ -566,17 +550,14 @@ export class GullGame {
 
   /**
    * Take control and fly: from the Ready gate or the pause menu. With the mouse, the game waits for the browser to
-   * grant the capture; with the keyboard alone, a trackpad or a gamepad it starts at once.
+   * grant the capture; with the keyboard alone it starts at once.
    */
   begin(mode: InputMode = this.st.inputMode): void {
     if (this.st.screen !== 'playing' || this.st.gate === 'flying' || this.st.contextLost) return;
     this.audio.unlock();
+    // Prompts name the arrow keys, and keys rather than mouse buttons, when the mouse is not in use.
     this.input.profile = mode;
-    if (mode !== this.st.inputMode) {
-      this.publish({ inputMode: mode });
-      // Remembered for next time.
-      if (mode !== this.settings.profile) this.updateSettings({ profile: mode });
-    }
+    if (mode !== this.st.inputMode) this.publish({ inputMode: mode });
     if (mode !== 'mouse') {
       this.enterFlying();
       return;
@@ -700,13 +681,9 @@ export class GullGame {
     });
     document.addEventListener('mousedown', (ev) => {
       if (document.pointerLockElement !== canvas || this.st.gate !== 'flying') return;
-      if (ev.button === 0) this.poopHeld = true;
-      if (ev.button === 2) this.mouseScout = true;
+      for (const id of this.input.press(`Mouse${ev.button}`)) this.fire(id);
     });
-    document.addEventListener('mouseup', (ev) => {
-      if (ev.button === 0) this.poopHeld = false;
-      if (ev.button === 2) this.mouseScout = false;
-    });
+    document.addEventListener('mouseup', (ev) => this.input.release(`Mouse${ev.button}`));
     container.addEventListener('contextmenu', (ev) => ev.preventDefault());
     container.addEventListener(
       'wheel',
@@ -717,58 +694,45 @@ export class GullGame {
       { passive: false },
     );
     window.addEventListener('keydown', (ev) => {
+      // The browser's own shortcuts are the browser's.
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
       if ((ev.target as HTMLElement | null)?.closest?.('input, select, textarea')) return;
       if (this.st.screen !== 'playing') return;
       const gate = this.st.gate;
-      if (ev.code === 'Escape' || ev.code === 'KeyP') {
-        // Some browsers deliver the Escape that released the mouse as a key press too: one pause, not pause and back.
-        if (ev.code === 'Escape' && performance.now() - this.captureEndedAt < 300) return;
-        if (gate === 'flying') this.pause();
-        else if (gate === 'paused') this.toReady();
-        return;
-      }
+      const code = ev.code;
+      const on = this.input.actionsOn(code);
       if (gate === 'ready') {
         // Space or Enter at the Ready gate takes control, unless a button there has the focus (it handles them itself).
-        if ((ev.code === 'Space' || ev.code === 'Enter') && !(ev.target as HTMLElement | null)?.closest?.('button, a')) {
+        if ((code === 'Space' || code === 'Enter') && !(ev.target as HTMLElement | null)?.closest?.('button, a')) {
           ev.preventDefault();
           this.begin();
         }
         return;
       }
-      if (gate !== 'flying') return;
-      if (ev.code in KEYS || ev.code.startsWith('Arrow') || ev.code === 'F1') ev.preventDefault();
-      if (ev.repeat) return;
-      this.keys.add(ev.code);
-      const m = this.mission;
-      switch (ev.code) {
-        case 'KeyC':
-          this.cycleCamera();
-          break;
-        case 'KeyQ':
-          this.poopHeld = true;
-          break;
-        case 'KeyE':
-          m?.interact();
-          break;
-        case 'KeyF':
-          m?.eat();
-          break;
-        case 'KeyG':
-          m?.signal();
-          break;
-        case 'KeyH':
-        case 'F1':
-          this.updateSettings({ showControls: !this.settings.showControls });
-          break;
+      if (gate === 'paused') {
+        // Escape belongs to the pause card (it steps back to the Ready gate); the other pause key does the same. The
+        // key that opened the log or the controls closes them again, back into flight.
+        if (ev.repeat) return;
+        if (on.includes('pause')) this.toReady();
+        else if ((on.includes('log') && this.st.pauseTab === 'log') || (on.includes('help') && this.st.pauseTab === 'controls')) this.resume();
+        return;
       }
+      if (on.length || code.startsWith('Arrow')) ev.preventDefault();
+      if (code.startsWith('Arrow')) {
+        this.arrows.add(code);
+        return;
+      }
+      // Some browsers deliver the Escape that released the mouse as a key press too: one pause, not pause and back.
+      if (code === 'Escape' && performance.now() - this.captureEndedAt < 300) return;
+      // Dispatch by kind (actions.ts): the map says which actions this key is bound to, and fires each once per press.
+      for (const id of this.input.press(code)) this.fire(id);
     });
     window.addEventListener('keyup', (ev) => {
-      this.keys.delete(ev.code);
-      if (ev.code === 'KeyQ') this.poopHeld = false;
+      this.arrows.delete(ev.code);
+      this.input.release(ev.code);
     });
     window.addEventListener('blur', () => {
-      this.keys.clear();
-      this.poopHeld = this.mouseScout = false;
+      this.releaseInput();
       this.pause();
     });
     document.addEventListener('visibilitychange', () => {
@@ -778,6 +742,30 @@ export class GullGame {
       // Ask before leaving an operation under way.
       if (this.st.screen === 'playing' && this.started && !this.mission?.finished && this.st.operation !== 'free') ev.preventDefault();
     });
+  }
+
+  /** What the application itself does for an action of kind 'app'. An id without an entry here does nothing. */
+  private readonly appActions: Record<string, () => void> = {
+    camera: () => this.cycleCamera(),
+    pause: () => this.pause(),
+    help: () => this.pause('controls'),
+    log: () => this.pause('log'),
+    repeat: () => this.repeatRadio(),
+  };
+
+  /**
+   * An action was pressed. Generic by kind, so an action added to the table needs nothing here: a press goes to the
+   * mission by name; an app action to its handler; controls and triggers are read while held (controls(), step()).
+   */
+  private fire(id: ActionId): void {
+    const kind = ACTION_TABLE[id]?.kind;
+    if (kind === 'press') this.mission?.press(id);
+    else if (kind === 'app') this.appActions[id]?.();
+  }
+
+  /** Say the last radio line again. */
+  repeatRadio(): void {
+    if (this.messages.repeatLast() && this.messages.step(0)) this.publish({ msg: this.messages.view });
   }
 
   cycleCamera(): void {
@@ -815,14 +803,9 @@ export class GullGame {
     v.baseFov = s.fov;
   }
 
+  /** The held controls for this step: every control action that is down sets the GullControls field of its name. */
   private controls(): GullControls {
-    const c = { ...NO_CONTROLS };
-    for (const k of this.keys) {
-      const m = KEYS[k];
-      if (m) c[m] = true;
-    }
-    c.scout = c.scout || this.mouseScout;
-    return c;
+    return this.input.controls(NO_CONTROLS);
   }
 
   // ------------------------------------------------------------------ the loop
@@ -853,7 +836,8 @@ export class GullGame {
     } else if (!this.frozen && (screen === 'title' || screen === 'briefing' || screen === 'results')) {
       this.titleCamera(dt);
     }
-    if (flying) this.uiTimers(dt);
+    // Messages keep real time (a slow frame does not shorten a line's reading time by much), and stop with the game.
+    if (flying && this.messages.step(Math.min(Math.max(raw, 0), 0.25))) this.publish({ msg: this.messages.view });
     this.renderFrame(dt);
     this.afterDraw(now, raw * 1000);
     this.fpsAcc.n++;
@@ -890,10 +874,11 @@ export class GullGame {
     world.waterLevel = this.waterLevel();
     const g = m.gull;
     const lookRate = 1.6 * dt;
-    const ay = (this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('ArrowLeft') ? 1 : 0);
-    const ap = (this.keys.has('ArrowUp') ? 1 : 0) - (this.keys.has('ArrowDown') ? 1 : 0);
+    const ay = (this.arrows.has('ArrowRight') ? 1 : 0) - (this.arrows.has('ArrowLeft') ? 1 : 0);
+    const ap = (this.arrows.has('ArrowUp') ? 1 : 0) - (this.arrows.has('ArrowDown') ? 1 : 0);
     if (ay || ap) g.look(ay * lookRate, ap * lookRate * (this.settings.invertY ? -1 : 1));
-    m.step(dt, this.controls(), this.poopHeld);
+    m.step(dt, this.controls(), this.input.isHeld('poop'));
+    this.coach?.step(dt);
     this.drainEvents();
   }
 
@@ -908,24 +893,38 @@ export class GullGame {
     if (ev.skim) this.audio.play('skim', undefined, -6);
     if (ev.poop) this.audio.play('poop', undefined, -8);
     m.gull.events = { flap: false, land: false, splash: false, bonk: false, skim: false, poop: false };
-    for (const e of m.takeEvents()) this.onMissionEvent(e);
+    const batch = m.takeEvents();
+    if (batch.length) {
+      this.messages.now = m.elapsed;
+      // A radio line that comes with an alert (spotted, the papers dropped) is urgent: it is said at once.
+      const urgent = batch.some((e) => (e.type === 'banner' && (e.tone === 'bad' || e.tone === 'warn')) || (e.type === 'toast' && e.tone === 'bad'));
+      for (const e of batch) this.onMissionEvent(e, urgent);
+    }
+    this.noteObjectives(m);
+    if (this.messages.step(0)) this.publish({ msg: this.messages.view });
   }
 
-  private onMissionEvent(e: MissionEvent): void {
+  /**
+   * A mission's event, sent to its place. What the mission says goes to the message bus, which gives each kind one
+   * slot: radio, toast (the feed), and banner, which is an alert when it is a warning. Text is passed through
+   * `tokenise`, so a key still named in old text is shown as its action's current binding.
+   */
+  private onMissionEvent(e: MissionEvent, urgent: boolean): void {
     switch (e.type) {
-      case 'radio':
-        this.radioQueue.push(e);
-        if (this.radioTimer <= 0) this.nextRadio();
-        break;
-      case 'toast': {
-        const id = ++this.seq;
-        this.toastTimers.set(id, 3.2);
-        this.publish({ toasts: [...this.st.toasts.slice(-4), { id, text: e.text, tone: e.tone }] });
+      case 'radio': {
+        // A mission may set `priority` on the event itself ('urgent', 'normal', 'flavour').
+        const asked = (e as { priority?: RadioPriority }).priority;
+        this.messages.radio(e.speaker, tokenise(e.text), asked ?? (urgent ? 'urgent' : 'normal'));
         break;
       }
+      case 'toast':
+        // "Done: …" is announced in the orders card (noteObjectives), not as a toast as well.
+        if (e.tone === 'good' && e.text.startsWith('Done: ')) break;
+        this.messages.toast(tokenise(e.text), e.tone);
+        break;
       case 'banner':
-        this.bannerTimer = e.dur;
-        this.publish({ banner: { text: e.text, tone: e.tone, id: ++this.seq } });
+        if (e.tone === 'bad' || e.tone === 'warn') this.messages.alert(e.text, e.tone, e.dur);
+        else this.messages.banner(e.text, e.tone, e.dur);
         break;
       case 'sfx':
         this.audio.play(e.name, e.at, e.gain ?? 0, e.rate ?? 1);
@@ -945,36 +944,21 @@ export class GullGame {
     }
   }
 
-  private nextRadio(): void {
-    const r = this.radioQueue.shift();
-    if (!r) {
-      this.radioTimer = 0;
-      if (this.st.radio) this.publish({ radio: undefined });
-      return;
+  /** Announce changes of orders: an objective done or failed, and a new one to act on. */
+  private noteObjectives(m: Mission): void {
+    for (const o of m.objectives) {
+      const was = this.objSeen.get(o.id);
+      if (was === o.state) continue;
+      this.objSeen.set(o.id, o.state);
+      if (was === undefined) continue;
+      if (o.state === 'done') this.messages.objective(tokenise(o.text), 'done');
+      else if (o.state === 'failed') this.messages.objective(tokenise(o.text), 'failed');
     }
-    this.radioTimer = r.dur;
-    this.publish({ radio: { speaker: r.speaker, text: r.text, id: ++this.seq } });
-  }
-
-  private uiTimers(dt: number): void {
-    if (this.radioTimer > 0) {
-      this.radioTimer -= dt;
-      if (this.radioTimer <= 0) this.nextRadio();
-    }
-    if (this.bannerTimer > 0) {
-      this.bannerTimer -= dt;
-      if (this.bannerTimer <= 0) this.publish({ banner: undefined });
-    }
-    if (this.toastTimers.size) {
-      let changed = false;
-      for (const [id, t] of this.toastTimers) {
-        const left = t - dt;
-        if (left <= 0) {
-          this.toastTimers.delete(id);
-          changed = true;
-        } else this.toastTimers.set(id, left);
-      }
-      if (changed) this.publish({ toasts: this.st.toasts.filter((x) => this.toastTimers.has(x.id)) });
+    const cur = m.objectives.find((o) => o.state === 'active' && !o.optional);
+    const id = cur?.id ?? '';
+    if (id !== this.orderId) {
+      this.orderId = id;
+      if (cur) this.messages.objective(tokenise(cur.text), 'new');
     }
   }
 
@@ -1069,30 +1053,59 @@ export class GullGame {
     else this.anchors.delete(id);
   }
 
-  /** Pin each registered label to its head, every frame (React draws their contents ten times a second). */
+  /** The fixed HUD boxes as they are on screen now (CSS pixels from the picture's top left). */
+  private measureHud(): Box[] {
+    const root = this.root;
+    const canvas = this.view?.renderer.domElement;
+    if (!root || !canvas) return [];
+    const origin = canvas.getBoundingClientRect();
+    const out: Box[] = [];
+    for (const el of root.querySelectorAll<HTMLElement>('[data-hud]')) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out.push({ x: r.left - origin.left, y: r.top - origin.top, w: r.width, h: r.height });
+    }
+    return out;
+  }
+
+  /**
+   * Pin each registered label to its place in the world, every frame (React draws their contents ten times a second),
+   * clear of the fixed HUD and of each other (labels.ts): the drop marker's label first, then people, nearest first.
+   * A label with nowhere near to go is hidden for the frame.
+   */
   private placeAnchors(m: Mission, alpha: number): void {
     if (!this.anchors.size) return;
     const v = this.view!;
     const mv = this.missionView;
-    const w = v.renderer.domElement.clientWidth;
-    const h = v.renderer.domElement.clientHeight;
-    const place = (id: string, at: { e: number; n: number; h: number } | undefined) => {
+    const view = { w: v.renderer.domElement.clientWidth, h: v.renderer.domElement.clientHeight };
+    const now = performance.now();
+    if (now - this.hudBoxesAt > 200) {
+      this.hudBoxesAt = now;
+      this.hudBoxes = this.measureHud();
+    }
+    const taken = [...this.hudBoxes];
+    const place = (id: string, at: { e: number; n: number; h: number } | undefined, below = false) => {
       const el = this.anchors.get(id);
       if (!el) return;
       const s = at ? v.screenOf(at.e, at.n, at.h) : undefined;
-      if (!s || s.behind || Math.abs(s.x) > 1.15 || Math.abs(s.y) > 1.15) {
+      const bw = el.offsetWidth;
+      const bh = el.offsetHeight;
+      const box = s && !s.behind && Math.abs(s.x) <= 1.15 && Math.abs(s.y) <= 1.15 && bw > 0 ? placeBox({ x: (s.x * 0.5 + 0.5) * view.w - bw / 2, y: (0.5 - s.y * 0.5) * view.h + (below ? 0.9 * bh : -bh), w: bw, h: bh }, taken, view, 6, 240) : undefined;
+      if (!box) {
         el.style.visibility = 'hidden';
         return;
       }
+      taken.push(box);
       el.style.visibility = 'visible';
-      el.style.transform = `translate3d(${((s.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((0.5 - s.y * 0.5) * h).toFixed(1)}px, 0) translate(-50%, -100%)`;
+      el.style.transform = `translate3d(${box.x.toFixed(1)}px, ${box.y.toFixed(1)}px, 0)`;
     };
-    for (const g of m.guards) place(g.id, mv?.headOf(g, alpha, 2.3));
-    for (const n of m.npcs) place(n.id, mv?.headOf(n, alpha, 2.1));
-    for (const mm of m.marchers) place(mm.id, mv?.headOf(mm, alpha, 2.1));
     if (this.anchors.has('drop')) {
       const p = this.dropRing.position;
-      place('drop', this.dropRing.visible && this.dropOnTarget ? { e: p.x, n: -p.z, h: p.y + this.world!.waterLevel } : undefined);
+      place('drop', this.dropRing.visible && this.dropOnTarget ? { e: p.x, n: -p.z, h: p.y + this.world!.waterLevel } : undefined, true);
+    }
+    for (const id of this.anchorOrder) {
+      const guard = m.guards.find((x) => x.id === id);
+      const other = guard ? undefined : (m.npcs.find((x) => x.id === id) ?? m.marchers.find((x) => x.id === id));
+      place(id, guard ? mv?.headOf(guard, alpha, 2.3) : other ? mv?.headOf(other, alpha, 2.1) : undefined);
     }
   }
 
@@ -1102,20 +1115,24 @@ export class GullGame {
     const world = this.world!;
     const ground = world.surfaceAt(g.pos.e, g.pos.n).h;
     let offscreen: number | undefined;
+    let distance: number | undefined;
     const target = m.running ? m.currentTarget() : undefined;
     if (target) {
+      distance = Math.hypot(target.e - g.pos.e, target.n - g.pos.n, target.h - g.pos.h);
       const s = v.screenOf(target.e, target.n, target.h + 2.2);
       if (s.behind || Math.abs(s.x) > 0.95 || Math.abs(s.y) > 0.92) offscreen = s.behind ? Math.atan2(-s.x, -Math.abs(s.y) - 1) : Math.atan2(s.x, s.y);
     }
-    const overlays: GuardOverlay[] = [];
+    const near: (GuardOverlay & { d: number })[] = [];
+    const away = (p: { e: number; n: number; h: number }) => Math.hypot(p.e - g.pos.e, p.n - g.pos.n, p.h - g.pos.h);
     for (const gd of m.guards) {
-      const head = gd.headPosition();
-      const d = Math.hypot(head.e - g.pos.e, head.n - g.pos.n, head.h - g.pos.h);
+      const d = away(gd.headPosition());
       if (d > 90) continue;
       const st = gd.state;
       const icon = st === GuardState.Alert ? '!' : st === GuardState.Suspicious || st === GuardState.Investigate || st === GuardState.Search ? '?' : st === GuardState.Distracted ? '…' : '';
       const steps = gd.tagged && gd.routineText ? gd.routineText.split(' · ') : undefined;
-      overlays.push({
+      const tag = g.scouting && !gd.tagged ? m.tagProgressOf(gd) : undefined;
+      if (!gd.tagged && !icon && !gd.speech && !(tag && tag > 0)) continue;
+      near.push({
         id: gd.id,
         name: gd.tagged ? gd.name : undefined,
         routine: steps,
@@ -1124,32 +1141,44 @@ export class GullGame {
         suspicion: gd.suspicion / 100,
         icon,
         speech: gd.speech?.text,
-        tag: g.scouting && !gd.tagged ? m.tagProgressOf(gd) : undefined,
+        tag,
+        d,
       });
     }
-    for (const n of [...m.npcs, ...m.marchers]) {
-      if (!n.speech) continue;
-      overlays.push({ id: n.id, state: '', suspicion: 0, icon: '', speech: n.speech.text });
-      if (overlays.length > 14) break;
+    for (const n of [...m.npcs, ...m.marchers]) if (n.speech) near.push({ id: n.id, state: '', suspicion: 0, icon: '', speech: n.speech.text, d: away(n.pos) });
+    // Nearest first, and three people speaking at most: a parade in uproar is otherwise a wall of bubbles.
+    near.sort((a, b) => a.d - b.d);
+    let speaking = 0;
+    const overlays: GuardOverlay[] = [];
+    for (const { d: _d, ...o } of near) {
+      if (o.speech && ++speaking > 3) o.speech = undefined;
+      if (o.name || o.icon || o.speech || (o.tag !== undefined && o.tag > 0)) overlays.push(o);
     }
+    this.anchorOrder = overlays.map((o) => o.id);
+    // The one prompt on show is the coach's choice: a lesson, a reminder, or the mission's own prompt.
+    this.messages.setPrompt(this.st.gate === 'flying' ? this.coach?.prompt() : undefined);
+    const said = this.messages.step(0);
     this.publish({
       hud: {
         speedKmh: g.speed() * 3.6,
+        height: Math.max(0, g.pos.h - world.waterLevel),
         altitude: Math.max(0, g.pos.h - Math.max(ground, world.waterLevel) - 0.3),
         mode: g.modeName(),
         payload: g.payload,
         maxPayload: g.profile.maxPayload,
         heading: ((g.yaw * 180) / Math.PI + 360) % 360,
         drop: this.dropRing.visible && this.dropOnTarget ? { onTarget: true } : undefined,
-        offscreen,
         beak: m.beak?.name,
+        beakIsMission: m.beak?.isMission,
+        distance,
+        offscreen,
       },
-      objectives: m.objectives.filter((o) => o.state !== 'hidden').map((o) => ({ id: o.id, text: o.text, state: o.state, optional: o.optional })),
-      prompt: m.prompt(),
+      objectives: m.objectives.filter((o) => o.state !== 'hidden').map((o) => ({ id: o.id, text: tokenise(o.text), state: o.state, optional: o.optional })),
       score: m.liveScore(),
       tension: m.tension,
       overlays,
       fps: this.fpsAcc.fps,
+      ...(said ? { msg: this.messages.view } : {}),
     });
   }
 

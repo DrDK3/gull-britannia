@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { PRESET_LABELS, type GraphicsPreset } from '../../render/graphics';
 import { OPERATIONS } from '../app/briefings';
-import type { GameState, GullGame } from '../app/game';
+import type { GameState, GullGame, PauseTab } from '../app/game';
 import type { Settings } from '../app/settings';
 import { fmtTime } from '../game/mission';
 import { CAMERA_LABEL, GULL_CAMERAS } from '../view/gullScene';
 import { useDialog } from './dialog';
+import { Hud } from './Hud';
+import { ControlsList, Keys } from './keys';
 
 export function App({ game }: { game: GullGame }) {
   const host = useRef<HTMLDivElement>(null);
@@ -23,7 +25,8 @@ export function App({ game }: { game: GullGame }) {
   return (
     <div className="gb-root">
       <div ref={host} className="gb-canvas" />
-      {playing && <Hud game={game} st={st} />}
+      {/* At the Ready gate there is the scene and one card: the HUD comes up with control. */}
+      {playing && st.gate !== 'ready' && <Hud game={game} st={st} />}
       {playing && st.gate === 'ready' && !st.contextLost && <ReadyGate game={game} st={st} />}
       {playing && st.gate === 'paused' && !st.contextLost && <PauseMenu game={game} st={st} />}
       {playing && st.contextLost && (
@@ -108,7 +111,7 @@ function ErrorCard({ st }: { st: GameState }) {
 }
 
 function Title({ game, st }: { game: GullGame; st: GameState }) {
-  const [view, setView] = useState<'menu' | 'settings' | 'credits'>('menu');
+  const [view, setView] = useState<'menu' | 'settings' | 'controls' | 'credits'>('menu');
   const done = st.saved.done;
   const unlocked = (i: number) => st.settings.unlockAll || i === 0 || done.includes(OPERATIONS[i - 1]!.id);
   const ops = OPERATIONS.filter((o) => o.playable);
@@ -144,6 +147,7 @@ function Title({ game, st }: { game: GullGame; st: GameState }) {
           >
             <b>Free flight</b> <span className="gb-fine">— the harbour, no orders</span>
           </button>
+          <button onClick={() => setView('controls')}>Controls</button>
           <button onClick={() => setView('settings')}>Settings</button>
           <button onClick={() => setView('credits')}>Credits and licences</button>
           <p className="gb-fine gb-credits">
@@ -154,6 +158,16 @@ function Title({ game, st }: { game: GullGame; st: GameState }) {
       {view === 'settings' && (
         <>
           <SettingsPanel game={game} s={st.settings} />
+          <button data-autofocus onClick={() => setView('menu')}>
+            Back
+          </button>
+        </>
+      )}
+      {view === 'controls' && (
+        <>
+          <h2 className="gb-h">Controls</h2>
+          <p className="gb-fine">In flight you are told one thing at a time. This is the whole list.</p>
+          <ControlsList game={game} />
           <button data-autofocus onClick={() => setView('menu')}>
             Back
           </button>
@@ -199,25 +213,44 @@ function Credits() {
   );
 }
 
+/**
+ * The briefing: about 80 words (the short text and the orders), with the whole dossier behind "Read full dossier".
+ * Begin stays in view in the card's foot.
+ */
 function BriefingCard({ game, st }: { game: GullGame; st: GameState }) {
+  const [full, setFull] = useState(false);
   const b = st.briefing;
   if (!b) return null;
+  const paragraphs = (text: string) =>
+    text.split('\n\n').map((p, i) => (
+      <p key={i}>
+        <Keys text={p} label={game.label} />
+      </p>
+    ));
   return (
     <Card label={`Briefing: ${st.operationTitle}`} className="gb-dossier gb-sheet" onClose={() => game.toTitle()}>
       <div className="gb-sheet-body">
         <div className="gb-stamp">{b.file}</div>
         <div className="gb-dateline">{b.dateline}</div>
         <h2>{st.operationTitle}</h2>
-        {b.short.split('\n\n').map((p, i) => (
-          <p key={i}>{p}</p>
-        ))}
+        <div className="gb-brief-short">{paragraphs(b.short)}</div>
         <h3 className="gb-h">Orders</h3>
-        <ol>
+        <ol className="gb-brief-orders">
           {b.orders.map((o) => (
-            <li key={o}>{o}</li>
+            <li key={o}>
+              <Keys text={o} label={game.label} />
+            </li>
           ))}
         </ol>
-        <p className="gb-signed">{b.signed}</p>
+        <button className="gb-more" aria-expanded={full} onClick={() => setFull(!full)}>
+          {full ? 'Close full dossier' : 'Read full dossier'}
+        </button>
+        {full && (
+          <div className="gb-brief-full">
+            {paragraphs(b.full)}
+            <p className="gb-signed">{b.signed}</p>
+          </div>
+        )}
       </div>
       <div className="gb-actions gb-sheet-foot">
         <button className="gb-primary" data-autofocus onClick={() => game.startOperation(st.operation!)}>
@@ -229,7 +262,10 @@ function BriefingCard({ game, st }: { game: GullGame; st: GameState }) {
   );
 }
 
-/** Before the operation starts, and after Esc in the pause menu: the scene, and one action to take control. */
+/**
+ * Before the operation starts, and after Esc in the pause menu: the scene, and one action to take control. The card
+ * sits at the top of the screen, over the sky: the gull, lower down, is in plain view.
+ */
 function ReadyGate({ game, st }: { game: GullGame; st: GameState }) {
   const ref = useRef<HTMLDivElement>(null);
   useDialog(ref);
@@ -238,7 +274,11 @@ function ReadyGate({ game, st }: { game: GullGame; st: GameState }) {
     <div className="gb-ready">
       <div ref={ref} className="gb-plate gb-ready-card" role="dialog" aria-label="Ready to fly">
         <div className="gb-ready-title">{st.operationTitle}</div>
-        {order && <div className="gb-ready-order">{order}</div>}
+        {order && (
+          <div className="gb-ready-order">
+            <Keys text={order} label={game.label} />
+          </div>
+        )}
         <button className="gb-go" data-autofocus onClick={() => game.begin('mouse')}>
           {st.captureRefused > 0 ? 'Click again to fly' : 'Click to fly'}
         </button>
@@ -259,7 +299,8 @@ function ResultsCard({ game, st }: { game: GullGame; st: GameState }) {
   const next = at >= 0 ? OPERATIONS.slice(at + 1).find((o) => o.playable) : undefined;
   return (
     <Card label={`Performance review: ${r.title}`} className="gb-dossier gb-results gb-sheet" onClose={() => game.toTitle()}>
-      <div className="gb-sheet-body">
+      {/* The body scrolls and holds no control of its own: it takes the focus so that the keyboard can scroll it. */}
+      <div className="gb-sheet-body" tabIndex={0} role="group" aria-label="The review">
         <div className="gb-stamp">Performance review</div>
         <h2>{r.title}</h2>
         <div className="gb-grade">
@@ -311,138 +352,23 @@ function ResultsCard({ game, st }: { game: GullGame; st: GameState }) {
   );
 }
 
-const TONE_CLASS: Record<string, string> = { good: 'gb-good', food: 'gb-food', warn: 'gb-warn', bad: 'gb-bad', info: 'gb-info' };
-
-function Hud({ game, st }: { game: GullGame; st: GameState }) {
-  const h = st.hud;
-  const s = st.settings;
-  const flying = st.gate === 'flying';
-  return (
-    <div className="gb-hudroot" aria-hidden={!flying}>
-      <div className="gb-hud gb-plate gb-hud-tl">
-        <div className="gb-readout">
-          <b>{Math.round(h.speedKmh)}</b> km/h · <b>{Math.round(h.altitude)}</b> m
-        </div>
-        <div className="gb-payload" title="Payload">
-          {Array.from({ length: h.maxPayload }, (_, i) => (
-            <span key={i} className={i < h.payload ? 'on' : ''} />
-          ))}
-          <span className="gb-beak">{h.beak ? `Beak: ${h.beak}` : 'Beak: empty'}</span>
-        </div>
-        {st.operation !== 'free' && <div>Score {st.score}</div>}
-      </div>
-      {st.objectives.length > 0 && (
-        <div className="gb-hud gb-plate gb-objectives">
-          <div className="gb-obj-title">{st.operationTitle}</div>
-          {st.objectives.map((o) => (
-            <div key={o.id} className={`gb-obj gb-obj-${o.state} ${o.optional ? 'gb-obj-opt' : ''}`}>
-              <span className="gb-obj-box">{o.state === 'done' ? '✔' : o.state === 'failed' ? '✘' : ''}</span>
-              {o.text}
-            </div>
-          ))}
-        </div>
-      )}
-      {flying && (
-        <div className="gb-hud gb-bottom">
-          {st.radio && (
-            <div className="gb-plate gb-radio" key={st.radio.id} role="status">
-              <span className="gb-radio-who">{st.radio.speaker}:</span> {st.radio.text}
-            </div>
-          )}
-          {st.prompt && <div className="gb-plate gb-action">{st.prompt}</div>}
-        </div>
-      )}
-      <div className="gb-hud gb-toasts">
-        {st.toasts.map((t) => (
-          <div key={t.id} className={`gb-plate gb-toast ${TONE_CLASS[t.tone] ?? ''}`}>
-            {t.text}
-          </div>
-        ))}
-      </div>
-      {st.banner && (
-        <div className={`gb-hud gb-plate gb-banner ${TONE_CLASS[st.banner.tone] ?? ''}`} key={st.banner.id} role="alert">
-          {st.banner.text}
-        </div>
-      )}
-      {st.overlays.map((o) => (
-        <div key={o.id} className="gb-guard" ref={(el) => game.setAnchor(o.id, el)}>
-          {o.speech && <div className="gb-speech">{o.speech}</div>}
-          {o.icon && <div className={`gb-icon gb-icon-${o.icon === '!' ? 'alert' : o.icon === '?' ? 'sus' : 'busy'}`}>{o.icon}</div>}
-          {o.name && (
-            <div className="gb-plate gb-tagname">
-              {o.name} <span>· {o.state}</span>
-              <div className="gb-meter" role="img" aria-label={`Suspicion ${Math.round(o.suspicion * 100)}%`}>
-                <i style={{ width: `${Math.round(o.suspicion * 100)}%` }} />
-              </div>
-              {o.routine && (
-                <div className="gb-routine">
-                  {o.routine.map((step, i) => (
-                    <span key={i} className={i === o.routineStep ? 'on' : ''}>
-                      {step}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {o.tag !== undefined && o.tag > 0 && (
-            <div className="gb-plate gb-tagging">
-              Tagging <i style={{ width: `${Math.round(Math.min(1, o.tag) * 100)}%` }} />
-            </div>
-          )}
-        </div>
-      ))}
-      {h.drop && (
-        <div className="gb-plate gb-drop" ref={(el) => game.setAnchor('drop', el)}>
-          ON TARGET
-        </div>
-      )}
-      {h.offscreen !== undefined && <div className="gb-arrow" style={{ transform: `translate(-50%, -50%) rotate(${h.offscreen}rad) translateY(-38vmin)` }} />}
-      {st.tension === 2 && <div className="gb-vignette" />}
-      {st.debug && (
-        <div className="gb-hud gb-plate gb-debug">
-          {st.cameraLabel} camera · {Math.round(st.fps)} fps · {h.mode} · heading {String(Math.round(h.heading) % 360).padStart(3, '0')}°
-        </div>
-      )}
-      {s.showControls && flying && <ControlsPanel />}
-    </div>
-  );
-}
-
-const CONTROLS: [string, string][] = [
-  ['Mouse', 'steer'],
-  ['W', 'flap for speed'],
-  ['Space', 'flap for height · take off'],
-  ['S', 'brake'],
-  ['Shift', 'dive'],
-  ['A / D', 'bank'],
-  ['R', 'landing assist'],
-  ['E', 'snatch · set down · deliver'],
-  ['F', 'eat'],
-  ['Q / click', 'poop'],
-  ['T / right mouse', 'scout'],
-  ['G', 'signal'],
-  ['C', 'camera · wheel zooms'],
-  ['Esc', 'pause · H hides this'],
+const PAUSE_TABS: [PauseTab, string][] = [
+  ['orders', 'Orders'],
+  ['controls', 'Controls'],
+  ['log', 'Radio log'],
+  ['settings', 'Settings'],
 ];
 
-function ControlsPanel() {
-  return (
-    <div className="gb-hud gb-plate gb-controls">
-      {CONTROLS.map(([k, v]) => (
-        <div key={k}>
-          <b>{k}</b> {v}
-        </div>
-      ))}
-    </div>
-  );
-}
-
+/**
+ * The pause menu: resume, restart, abandon, and four pages. Orders (all of them, done and to do), Controls (the full
+ * list, which the HUD no longer carries), the Radio log (everything said so far) and Settings.
+ */
 function PauseMenu({ game, st }: { game: GullGame; st: GameState }) {
   const [confirm, setConfirm] = useState<'restart' | 'abandon' | undefined>();
   const what = st.operation === 'free' ? 'free flight' : 'operation';
+  const tab = st.pauseTab;
   return (
-    <Card label="Paused" className="gb-menu" onClose={() => (confirm ? setConfirm(undefined) : game.toReady())}>
+    <Card label="Paused" className="gb-menu gb-pause" onClose={() => (confirm ? setConfirm(undefined) : game.toReady())}>
       <div className="gb-stamp">Paused</div>
       <h2>{st.operationTitle}</h2>
       {!confirm && (
@@ -452,15 +378,36 @@ function PauseMenu({ game, st }: { game: GullGame; st: GameState }) {
           </button>
           <button onClick={() => setConfirm('restart')}>Restart {what}</button>
           <button onClick={() => setConfirm('abandon')}>Abandon to the title screen</button>
-          <h3 className="gb-h">Camera</h3>
-          <div className="gb-row">
-            {GULL_CAMERAS.map((c) => (
-              <button key={c} className={st.camera === c ? 'on' : ''} aria-pressed={st.camera === c} onClick={() => game.setCamera(c)}>
-                {CAMERA_LABEL[c]}
+          <div className="gb-tabs" role="tablist" aria-label="Notebook">
+            {PAUSE_TABS.map(([id, name]) => (
+              <button key={id} role="tab" id={`gb-tab-${id}`} aria-selected={tab === id} aria-controls="gb-tabpanel" className={tab === id ? 'on' : ''} onClick={() => game.setPauseTab(id)}>
+                {name}
               </button>
             ))}
           </div>
-          <SettingsPanel game={game} s={st.settings} />
+          <div className="gb-tabpanel" id="gb-tabpanel" role="tabpanel" aria-labelledby={`gb-tab-${tab}`}>
+            {tab === 'orders' && <OrdersPage game={game} st={st} />}
+            {tab === 'controls' && (
+              <>
+                <p className="gb-fine">In flight you are told one thing at a time. This is the whole list.</p>
+                <ControlsList game={game} />
+              </>
+            )}
+            {tab === 'log' && <RadioLog game={game} />}
+            {tab === 'settings' && (
+              <>
+                <h3 className="gb-h">Camera</h3>
+                <div className="gb-row">
+                  {GULL_CAMERAS.map((c) => (
+                    <button key={c} className={st.camera === c ? 'on' : ''} aria-pressed={st.camera === c} onClick={() => game.setCamera(c)}>
+                      {CAMERA_LABEL[c]}
+                    </button>
+                  ))}
+                </div>
+                <SettingsPanel game={game} s={st.settings} />
+              </>
+            )}
+          </div>
         </>
       )}
       {confirm && (
@@ -478,9 +425,48 @@ function PauseMenu({ game, st }: { game: GullGame; st: GameState }) {
   );
 }
 
+function OrdersPage({ game, st }: { game: GullGame; st: GameState }) {
+  if (!st.objectives.length) return <p>No orders. The harbour is yours.</p>;
+  return (
+    <ul className="gb-orders-page">
+      {st.objectives.map((o) => (
+        <li key={o.id} className={`gb-op-${o.state}`}>
+          <span className="gb-op-box" aria-hidden="true">
+            {o.state === 'done' ? '✓' : o.state === 'failed' ? '✗' : ''}
+          </span>
+          <span>
+            <span className="gb-sr">{o.state === 'done' ? 'Done: ' : o.state === 'failed' ? 'Failed: ' : 'To do: '}</span>
+            <Keys text={o.text} label={game.label} />
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Everything said on the radio this operation, with alerts and changes of orders between, oldest first. */
+function RadioLog({ game }: { game: GullGame }) {
+  const log = game.messages.log;
+  if (!log.length) return <p>Nothing on the radio yet.</p>;
+  return (
+    <ol className="gb-log">
+      {log.map((l) => (
+        <li key={l.id} className={`gb-log-${l.kind}`}>
+          <span className="gb-log-t">{fmtTime(l.t)}</span>
+          <span>
+            {l.speaker && <b>{l.speaker}: </b>}
+            <Keys text={l.text} label={game.label} />
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function SettingsPanel({ game, s }: { game: GullGame; s: Settings }) {
   const set = (p: Partial<Settings>) => game.updateSettings(p);
   const gfx = game.state.graphics;
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
   return (
     <div className="gb-settings">
       <h3 className="gb-h">Settings</h3>
@@ -496,19 +482,19 @@ function SettingsPanel({ game, s }: { game: GullGame; s: Settings }) {
         </select>
       </label>
       <label>
-        Mouse sensitivity <input type="range" min={0.5} max={6} step={0.1} value={s.sensitivity} onChange={(e) => set({ sensitivity: +e.target.value })} />
+        Mouse sensitivity <input type="range" min={0.5} max={6} step={0.1} value={s.sensitivity} aria-valuetext={s.sensitivity.toFixed(1)} onChange={(e) => set({ sensitivity: +e.target.value })} />
       </label>
       <label>
-        Field of view {s.fov}° <input type="range" min={55} max={95} step={1} value={s.fov} onChange={(e) => set({ fov: +e.target.value })} />
+        Field of view {s.fov}° <input type="range" min={55} max={95} step={1} value={s.fov} aria-valuetext={`${s.fov} degrees`} onChange={(e) => set({ fov: +e.target.value })} />
       </label>
       <label>
-        Master volume <input type="range" min={0} max={1} step={0.05} value={s.master} onChange={(e) => set({ master: +e.target.value })} />
+        Master volume <input type="range" min={0} max={1} step={0.05} value={s.master} aria-valuetext={pct(s.master)} onChange={(e) => set({ master: +e.target.value })} />
       </label>
       <label>
-        Music <input type="range" min={0} max={1} step={0.05} value={s.music} onChange={(e) => set({ music: +e.target.value })} />
+        Music <input type="range" min={0} max={1} step={0.05} value={s.music} aria-valuetext={pct(s.music)} onChange={(e) => set({ music: +e.target.value })} />
       </label>
       <label>
-        Effects <input type="range" min={0} max={1} step={0.05} value={s.effects} onChange={(e) => set({ effects: +e.target.value })} />
+        Effects <input type="range" min={0} max={1} step={0.05} value={s.effects} aria-valuetext={pct(s.effects)} onChange={(e) => set({ effects: +e.target.value })} />
       </label>
       <label className="gb-check">
         <input type="checkbox" checked={s.invertY} onChange={(e) => set({ invertY: e.target.checked })} /> Invert mouse Y
@@ -518,9 +504,6 @@ function SettingsPanel({ game, s }: { game: GullGame; s: Settings }) {
       </label>
       <label className="gb-check">
         <input type="checkbox" checked={s.dropMarker} onChange={(e) => set({ dropMarker: e.target.checked })} /> Drop marker
-      </label>
-      <label className="gb-check">
-        <input type="checkbox" checked={s.showControls} onChange={(e) => set({ showControls: e.target.checked })} /> Controls panel
       </label>
       <label className="gb-check">
         <input type="checkbox" checked={s.unlockAll} onChange={(e) => set({ unlockAll: e.target.checked })} /> Unlock all operations

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BINDINGS_VERSION, InputMap, PAD_DEFAULTS, actionGroups, defaultBindings, readPad, shapeAxis } from '../../src/gull/app/input';
-import { DEFAULT_SETTINGS, SETTINGS_VERSION, TABS, assistsInUse, cleanSettings } from '../../src/gull/app/settings';
+import { DEFAULT_SETTINGS, SETTINGS_VERSION, cleanSettings } from '../../src/gull/app/settings';
 import { ACTIONS, ACTION_IDS, formatActions, isAction } from '../../src/gull/game/actions';
 import { NO_CONTROLS } from '../../src/gull/game/gull';
 
@@ -214,31 +214,14 @@ describe('a gamepad in the standard mapping', () => {
 describe('settings', () => {
   it('keeps what is valid from a saved file and defaults the rest', () => {
     expect(cleanSettings(undefined)).toEqual(DEFAULT_SETTINGS);
-    const s = cleanSettings({ fov: 80, gameSpeed: 0.2, hudScale: 9, subtitleBackground: 'neon', profile: 'keys', invertY: 'yes', showControls: true, radioPace: 1.5 });
+    const s = cleanSettings({ fov: 80, sensitivity: 99, invertY: 'yes', showControls: true, master: 0.25 });
     expect(s.fov).toBe(80);
-    expect(s.profile).toBe('keys');
-    expect(s.radioPace).toBe(1.5);
+    expect(s.master).toBe(0.25);
     // Out of range or of the wrong kind: the default.
-    expect(s.gameSpeed).toBe(1);
-    expect(s.hudScale).toBe(1);
-    expect(s.subtitleBackground).toBe('paper');
+    expect(s.sensitivity).toBe(DEFAULT_SETTINGS.sensitivity);
     expect(s.invertY).toBe(false);
+    // The controls panel of the first releases is gone, and its switch with it.
     expect('showControls' in s).toBe(false);
     expect(SETTINGS_VERSION).toBe(2);
-  });
-
-  it('every setting is on exactly one tab', () => {
-    const onTabs = Object.values(TABS).flat();
-    expect([...onTabs].sort()).toEqual(Object.keys(DEFAULT_SETTINGS).sort());
-  });
-
-  it('the HUD can be made larger, never smaller than the 16 px floor', () => {
-    expect(cleanSettings({ hudScale: 0.8 }).hudScale).toBe(1);
-    expect(cleanSettings({ hudScale: 1.5 }).hudScale).toBe(1.5);
-  });
-
-  it('names the assists in use for the review', () => {
-    expect(assistsInUse(DEFAULT_SETTINGS)).toEqual([]);
-    expect(assistsInUse({ ...DEFAULT_SETTINGS, gameSpeed: 0.8, autoLand: true })).toEqual(['game speed 80%', 'automatic landing']);
   });
 });

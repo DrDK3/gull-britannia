@@ -109,6 +109,8 @@ export class MessageBus {
   hold = false;
   /** Mission time (seconds), stamped onto log entries: the controller keeps it current. */
   now = 0;
+  /** How many characters of a text the player reads: the controller counts a `{token}` as the label drawn for it. */
+  measure: (text: string) => number = (text) => text.length;
   /** Everything said on the radio and every alert, banner and change of orders, oldest first. */
   readonly log: LogEntry[] = [];
   view: MessageView = { feed: [] };
@@ -167,7 +169,7 @@ export class MessageBus {
   }
 
   private showRadio(line: QueuedRadio): void {
-    const total = readingTime(line.text, this.pace);
+    const total = Math.max(MIN_RADIO_S, this.measure(line.text) / READING_CPS) * this.pace;
     this.radioNow = { item: line, left: total, total };
     this.radioGap = 0;
     this.dirty = true;
@@ -219,7 +221,7 @@ export class MessageBus {
   }
 
   private toastTime(text: string): number {
-    return Math.max(3.5, text.length / READING_CPS + 1.5) * this.pace;
+    return Math.max(3.5, this.measure(text) / READING_CPS + 1.5) * this.pace;
   }
 
   /** A state the player must know about now: SPOTTED. Shown at once, for at least 2.5 s. */
