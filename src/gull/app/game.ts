@@ -7,8 +7,13 @@
  *   READY ──click, Space or "keyboard only"──▶ FLYING ──Esc, P, lost mouse capture, hidden tab──▶ PAUSED ──Resume──▶ FLYING
  *
  * The mission's clock, guards, radio and timers run only in FLYING, so nothing happens before the player has control.
- * Input is the keyboard and the mouse (pointer lock), or the keyboard alone (arrow keys look). The React UI subscribes
- * to `state`.
+ *
+ * Input goes through the input map (input.ts): keys, mouse buttons and a gamepad are bound to the player's actions
+ * (game/actions.ts) and dispatched by kind, so this file names no key. The player steers with the captured mouse, the
+ * arrow keys, the pointer's position (trackpad) or a stick.
+ *
+ * Everything the game says goes through the message bus (messages.ts), which gives each kind of message one fixed slot;
+ * what to teach comes from the coach (game/coach.ts). The React UI subscribes to `state`.
  */
 import * as THREE from 'three';
 import { loadDartData, type DartData } from '../../app/geoLoader';
@@ -19,10 +24,12 @@ import { buildConditions, DEFAULT_CONDITIONS, type BuiltConditions } from '../..
 import { presetSky } from '../../sim/env/sky';
 import { sunPosition } from '../../sim/env/sun';
 import { RDYC_ORIGIN } from '../../sim/geo/projection';
+import { ACTIONS, formatActions, type ActionId, type ActionInfo } from '../game/actions';
+import { Coach, tokenise } from '../game/coach';
 import { GuardState } from '../game/guard';
 import { Mode, NO_CONTROLS, type GullControls } from '../game/gull';
 import { M1_CONDITIONS } from '../game/m1';
-import type { Mission, MissionConditions, MissionEvent, Results, Tone } from '../game/mission';
+import type { Mission, MissionConditions, MissionEvent, ObjectiveState, Results } from '../game/mission';
 import { conditionsFor, createMission } from '../game/operations';
 import { AllyState } from '../game/parade';
 import { World } from '../game/world';
@@ -34,8 +41,11 @@ import { captureHeights, type CaptureArea } from '../view/heightCapture';
 import { MissionView } from '../view/missionView';
 import { GameAudio } from './audio';
 import { BRIEFINGS, OPERATIONS, type Briefing } from './briefings';
+import { InputMap, isPad, loadBindings, readPad, saveBindings, type Device, type InputProfile } from './input';
+import { placeBox, type Box } from './labels';
+import { MessageBus, type MessageView, type RadioPriority } from './messages';
 import { loadProgress, saveProgress, type Progress } from './progress';
-import { loadSettings, saveSettings, type Settings } from './settings';
+import { DEFAULT_SETTINGS, TABS, loadSettings, saveSettings, type Settings, type SettingsTab } from './settings';
 
 const DT = 1 / 60;
 const MAX_STEPS = 6;
@@ -51,20 +61,27 @@ export const CAPTURE_AREAS: CaptureArea[] = [
 export type Screen = 'loading' | 'title' | 'briefing' | 'playing' | 'results' | 'error';
 /** While playing: waiting for the player to take control, in control, or in the pause menu. */
 export type Gate = 'ready' | 'flying' | 'paused';
-/** How the player steers: the mouse (captured) with the keyboard, or the keyboard alone (arrow keys look). */
-export type InputMode = 'mouse' | 'keys';
+/** How the player steers (input.ts): the captured mouse, the arrow keys, the pointer's position, or a gamepad. */
+export type InputMode = InputProfile;
+/** The pause menu's pages. */
+export type PauseTab = 'orders' | 'controls' | 'log' | 'settings';
 
 export interface HudState {
   speedKmh: number;
+  /** Height above the river (m): what the readout shows. It reads the same on a roof as passing over it. */
+  height: number;
+  /** Clear air underneath (m). */
   altitude: number;
   mode: string;
   payload: number;
   maxPayload: number;
   heading: number;
   drop?: { onTarget: boolean };
-  /** The objective marker's direction when it is off screen (rad, 0 = up, clockwise). */
-  offscreen?: number;
   beak?: string;
+  /** The beak holds the operation's papers: a gull that guards look at twice. */
+  beakIsMission?: boolean;
+  /** The current order's marker: how far away it is (m), what it is called if it has a name, and whether it is in view. */
+  objective?: { distance: number; name?: string; inView: boolean };
 }
 
 export interface GuardOverlay {
@@ -108,12 +125,18 @@ export interface GameState {
   operationTitle?: string;
   briefing?: Briefing;
   objectives: { id: string; text: string; state: string; optional: boolean }[];
-  prompt: string;
   score: number;
   tension: number;
-  radio?: { speaker: string; text: string; id: number };
-  toasts: { id: number; text: string; tone: Tone }[];
-  banner?: { text: string; tone: Tone; id: number };
+  /** What the message bus has on show: radio, prompt, change of orders, toasts, alert or banner. */
+  msg: MessageView;
+  /** Whose labels prompts show: the keyboard and mouse, or the gamepad (whichever was used last). */
+  device: Device;
+  /** A gamepad is connected. */
+  padConnected: boolean;
+  /** Goes up whenever a binding changes, so that labels are drawn again. */
+  bindingsRev: number;
+  /** Which page the pause menu opens on. */
+  pauseTab: PauseTab;
   overlays: GuardOverlay[];
   results?: Results;
   saved: Progress;
@@ -124,17 +147,8 @@ export interface GameState {
 /** Let the page paint (a progress message) before a long synchronous step. */
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
-const KEYS: Record<string, keyof GullControls> = {
-  KeyW: 'forward',
-  KeyS: 'back',
-  KeyA: 'left',
-  KeyD: 'right',
-  Space: 'flap',
-  ShiftLeft: 'dive',
-  ShiftRight: 'dive',
-  KeyR: 'land',
-  KeyT: 'scout',
-};
+const ACTION_TABLE: Record<string, ActionInfo> = ACTIONS;
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export class GullGame {
   view?: GullScene;
@@ -163,11 +177,24 @@ export class GullGame {
   /** How the solid town was obtained this visit. */
   collisionSource: 'baked' | 'surveyed' = 'baked';
 
+  /** Which input does which action, and what each is called on the device in hand. */
+  readonly input = new InputMap(loadBindings());
+  /** Everything the game says in play, each kind in its own slot. */
+  readonly messages = new MessageBus();
+  /** Decides what to teach, one verb at a time (rebuilt with each mission). */
+  coach?: Coach;
+
   private readonly listeners = new Set<() => void>();
   private st: GameState;
-  private readonly keys = new Set<string>();
-  private mouseScout = false;
-  private poopHeld = false;
+  /** Arrow keys held: they turn the view in every profile. */
+  private readonly arrows = new Set<string>();
+  /** The pointer's place over the picture (−1…1 each way, y down) in the trackpad profile; undefined when it is away. */
+  private pointer: { x: number; y: number } | undefined;
+  /** Gamepad: the buttons down at the last poll, and the stick. */
+  private padDown = new Set<string>();
+  private padStick = { x: 0, y: 0 };
+  /** The Settings panel is waiting for a gamepad button to bind. */
+  private padCapture: ((code: string) => void) | undefined;
   private accumulator = 0;
   private lastFrame = 0;
   private raf = 0;
@@ -179,11 +206,15 @@ export class GullGame {
   private publishT = 0;
   private weatherT = 0;
   private resizeObs?: ResizeObserver;
-  private seq = 0;
-  private radioTimer = 0;
-  private bannerTimer = 0;
-  private readonly radioQueue: { speaker: string; text: string; dur: number }[] = [];
-  private readonly toastTimers = new Map<number, number>();
+  /** Objective states as last seen, and the id of the current order, to announce changes. */
+  private readonly objSeen = new Map<string, ObjectiveState>();
+  private orderId = '';
+  /** The fixed HUD boxes on screen (CSS pixels), which pinned labels keep clear of; measured a few times a second. */
+  private hudBoxes: Box[] = [];
+  private hudBoxesAt = -1e9;
+  private root?: HTMLElement;
+  /** Pinned labels, most important first (the order they are placed in). */
+  private anchorOrder: string[] = [];
   private titleT = 0;
   /** The current operation's clock zero (ms since 1970). */
   private startEpoch = Date.parse(M1_CONDITIONS.startTime);
@@ -205,7 +236,7 @@ export class GullGame {
       loaded: 0.05,
       issues: [],
       gate: 'ready',
-      inputMode: 'mouse',
+      inputMode: this.settings.profile,
       captureRefused: 0,
       locked: false,
       paused: false,
@@ -213,14 +244,17 @@ export class GullGame {
       debug: this.flags.debug,
       camera: 'chase',
       cameraLabel: CAMERA_LABEL.chase,
-      hud: { speedKmh: 0, altitude: 0, mode: '', payload: 3, maxPayload: 3, heading: 0 },
+      hud: { speedKmh: 0, height: 0, altitude: 0, mode: '', payload: 3, maxPayload: 3, heading: 0 },
       settings: this.settings,
       fps: 0,
       objectives: [],
-      prompt: '',
       score: 0,
       tension: 0,
-      toasts: [],
+      msg: this.messages.view,
+      device: 'keys',
+      padConnected: false,
+      bindingsRev: 0,
+      pauseTab: 'orders',
       overlays: [],
       saved: loadProgress(),
       graphics: 'balanced',
@@ -230,6 +264,27 @@ export class GullGame {
     ring.renderOrder = 5;
     ring.visible = false;
     this.dropRing = ring;
+    this.input.profile = this.settings.profile;
+    // Lines are timed by what the player reads: the binding's label, not the {token}.
+    this.messages.measure = (text) => formatActions(text, this.label).length;
+    this.messages.pace = this.settings.radioPace;
+    void this.readKeyboardLayout();
+  }
+
+  /** The label of an action's binding on the device in hand ("Space", "Right mouse", "A"). */
+  readonly label = (id: ActionId): string => this.input.label(id);
+
+  /** Where the browser can say what each key prints on this keyboard (AZERTY: the W key is Z), label by that. */
+  private async readKeyboardLayout(): Promise<void> {
+    try {
+      const kb = (navigator as Navigator & { keyboard?: { getLayoutMap?: () => Promise<{ get(code: string): string | undefined }> } }).keyboard;
+      const map = await kb?.getLayoutMap?.();
+      if (!map) return;
+      this.input.layout = map;
+      this.publish({ bindingsRev: this.st.bindingsRev + 1 });
+    } catch {
+      /* not offered here: US labels */
+    }
   }
 
   // ------------------------------------------------------------------ state for the UI
@@ -291,6 +346,7 @@ export class GullGame {
       return;
     }
     this.view = view;
+    this.root = container.parentElement ?? container;
     view.onContextChange = (lost) => this.onContext(lost);
     this.publish({ graphics: view.graphics.preset });
     view.game.add(this.model.root, this.dropRing);
@@ -441,15 +497,25 @@ export class GullGame {
     if (this.builtFor !== id || this.started || !this.mission) this.buildMission(id);
     const m = this.mission;
     if (!m) return;
-    this.keys.clear();
-    this.poopHeld = this.mouseScout = false;
-    this.radioQueue.length = 0;
-    this.radioTimer = 0;
+    this.releaseInput();
+    this.messages.clear();
+    this.coach = new Coach(m);
+    this.objSeen.clear();
+    for (const o of m.objectives) this.objSeen.set(o.id, o.state);
+    this.orderId = m.objectives.find((o) => o.state === 'active' && !o.optional)?.id ?? '';
     this.accumulator = 0;
     this.setCamera(this.st.camera === 'scenic' || this.st.camera === 'orbit' ? 'chase' : this.st.camera);
     this.audio.setPaused(false);
-    this.publish({ screen: 'playing', gate: 'ready', paused: false, captureRefused: 0, operation: id, operationTitle: m.title, results: undefined, radio: undefined, toasts: [], banner: undefined, overlays: [] });
+    this.publish({ screen: 'playing', gate: 'ready', paused: false, captureRefused: 0, operation: id, operationTitle: m.title, results: undefined, msg: this.messages.view, overlays: [] });
     this.publishHud(m);
+  }
+
+  /** Let go of every key, button and toggle (a new start, a pause, lost focus). */
+  private releaseInput(): void {
+    this.input.releaseAll();
+    this.arrows.clear();
+    this.padDown.clear();
+    this.padStick = { x: 0, y: 0 };
   }
 
   private endMission(): void {
@@ -458,6 +524,7 @@ export class GullGame {
     this.mission = undefined;
     this.builtFor = undefined;
     this.started = false;
+    this.coach = undefined;
     this.anchors.clear();
     this.audio.stopAll();
   }
@@ -470,7 +537,8 @@ export class GullGame {
     this.applyConditions(M1_CONDITIONS);
     this.audio.setPaused(false);
     this.audio.music('title');
-    this.publish({ screen: 'title', gate: 'ready', paused: false, results: undefined, radio: undefined, toasts: [], banner: undefined, overlays: [] });
+    this.messages.clear();
+    this.publish({ screen: 'title', gate: 'ready', paused: false, results: undefined, msg: this.messages.view, overlays: [] });
   }
 
   /** Start the operation again, and take control at once (the click on Restart or Try again allows it). */
@@ -490,20 +558,26 @@ export class GullGame {
     this.wantCapture = false;
     if (document.pointerLockElement) document.exitPointerLock();
     this.audio.music('results');
-    this.publish({ screen: 'results', results: r, saved, radio: undefined, overlays: [] });
+    this.messages.clear(true);
+    this.publish({ screen: 'results', results: r, saved, msg: this.messages.view, overlays: [] });
   }
 
   // ------------------------------------------------------------------ the gate: ready, flying, paused
 
   /**
    * Take control and fly: from the Ready gate or the pause menu. With the mouse, the game waits for the browser to
-   * grant the capture; with the keyboard alone it starts at once.
+   * grant the capture; with the keyboard alone, a trackpad or a gamepad it starts at once.
    */
   begin(mode: InputMode = this.st.inputMode): void {
     if (this.st.screen !== 'playing' || this.st.gate === 'flying' || this.st.contextLost) return;
     this.audio.unlock();
-    if (mode !== this.st.inputMode) this.publish({ inputMode: mode });
-    if (mode === 'keys') {
+    this.input.profile = mode;
+    if (mode !== this.st.inputMode) {
+      this.publish({ inputMode: mode });
+      // Remembered for next time.
+      if (mode !== this.settings.profile) this.updateSettings({ profile: mode });
+    }
+    if (mode !== 'mouse') {
       this.enterFlying();
       return;
     }
@@ -535,8 +609,7 @@ export class GullGame {
     const m = this.mission;
     if (!m || this.st.screen !== 'playing') return;
     this.wantCapture = false;
-    this.keys.clear();
-    this.poopHeld = this.mouseScout = false;
+    this.releaseInput();
     this.lastFrame = performance.now();
     this.accumulator = 0;
     this.audio.setPaused(false);
@@ -545,18 +618,22 @@ export class GullGame {
       this.started = true;
       m.start();
       this.drainEvents();
+      this.publishHud(m);
     }
   }
 
-  /** To the pause menu (from flying). */
-  pause(): void {
+  /** To the pause menu (from flying), on the page asked for. */
+  pause(tab: PauseTab = 'orders'): void {
     if (this.st.screen !== 'playing' || this.st.gate !== 'flying') return;
-    this.keys.clear();
-    this.poopHeld = this.mouseScout = false;
+    this.releaseInput();
     this.wantCapture = false;
     this.audio.setPaused(true);
-    this.publish({ gate: 'paused', paused: true });
+    this.publish({ gate: 'paused', paused: true, pauseTab: tab });
     if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  setPauseTab(tab: PauseTab): void {
+    if (tab !== this.st.pauseTab) this.publish({ pauseTab: tab });
   }
 
   /** From the pause menu back to flying (the mouse is captured again first). */
