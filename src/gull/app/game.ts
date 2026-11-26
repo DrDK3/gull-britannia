@@ -852,6 +852,7 @@ export class GullGame {
         break;
       case 'sfx':
         this.audio.play(e.name, e.at, e.gain ?? 0, e.rate ?? 1);
+        if (!e.at && (e.name === 'squawk' || e.name === 'flock')) this.model.call(); // handoff: art. The gull is seen to give the call that is heard.
         break;
       case 'loop':
         this.audio.loop(e.name, e.on, e.gain ?? 0);
@@ -938,6 +939,7 @@ export class GullGame {
     // game (tests and screenshot scripts set `frozen`), draw the latest state as it is.
     const alpha = this.frozen ? 1 : Math.min(1, this.accumulator / DT);
     this.model.root.visible = !!m && !(playing && this.st.camera === 'first');
+    this.model.watch(m?.gull); // handoff: art. The model reads what `pose` is not given from the gull itself (look pitch, and roll, call and eating when they exist).
     this.dropRing.visible = false;
     this.dropOnTarget = false;
     if (m) {
