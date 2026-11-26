@@ -413,7 +413,10 @@ body,
   border-bottom: none;
 }
 
-.gb-tabs button.on {
+.gb-card .gb-tabs button.on,
+.gb-card .gb-tabs button.on:hover,
+.gb-card .gb-row button.on,
+.gb-card .gb-row button.on:hover {
   background: var(--ink);
   color: var(--paper);
 }
@@ -587,7 +590,7 @@ body,
 /* Top left: the gull. */
 .gb-status {
   padding: 0.55em 0.9em;
-  min-width: 13em;
+  max-width: 100%;
 }
 
 .gb-beakrow {
@@ -636,7 +639,9 @@ body,
   border-width: 3px;
   border-color: currentColor;
   padding: 0.1em 0.7em;
-  white-space: nowrap;
+  /* One line where there is room; on a narrow window it wraps rather than squeeze the columns beside it. */
+  max-width: 38vw;
+  text-align: center;
   animation: gb-fade 0.15s ease-out both;
 }
 
@@ -646,9 +651,6 @@ body,
 }
 
 .gb-orders-title {
-  display: flex;
-  justify-content: space-between;
-  gap: 1em;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;

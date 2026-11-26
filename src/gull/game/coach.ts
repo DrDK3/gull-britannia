@@ -149,7 +149,8 @@ export const LESSONS: Record<string, Lesson[]> = {
     {
       id: 'land',
       air: true,
-      text: (m) => (flatDistanceToPerch(m, 'station') < 60 ? 'Hold {land} and look at the roof to land.' : 'Fly to the yellow marker: the station roof.'),
+      // The landing key also brakes: it is named only once the roof is within its reach, or the gull would stop short.
+      text: (m) => (flatDistanceToPerch(m, 'station') < 25 ? 'Hold {land} and look at the roof to land.' : 'Fly to the yellow marker: the station roof.'),
       nudge: 'Close to the roof, hold {land} and look at it. The wings do the rest.',
       patience: 45,
       done: (m) => m.objectiveState('perch') === 'done',
@@ -171,7 +172,8 @@ export const LESSONS: Record<string, Lesson[]> = {
     {
       id: 'snatch',
       optional: true,
-      when: (m) => !m.beak && !!m.nearestItem(12),
+      // Taught on food (lunch comes first); the papers have their own prompt when the gull is beside them.
+      when: (m) => !m.beak && !!m.nearestItem(12)?.isFood,
       text: 'Get beak-close to it, then {interact} to snatch.',
       done: (m) => !!m.beak || m.stats.food.length > 0,
     },

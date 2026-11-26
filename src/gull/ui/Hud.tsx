@@ -24,7 +24,6 @@ export function Hud({ game, st }: { game: GullGame; st: GameState }) {
   const active = st.objectives.filter((o) => o.state === 'active');
   const order = active.find((o) => !o.optional);
   const also = active.filter((o) => o !== order);
-  const done = st.objectives.filter((o) => o.state === 'done').length;
   const status = st.tension === 2 ? { text: 'SPOTTED', tone: 'bad' } : st.tension === 1 ? { text: 'WATCHED', tone: 'warn' } : h.beakIsMission ? { text: 'CARRYING PAPERS', tone: 'warn' } : { text: 'JUST A GULL', tone: 'good' };
   // The radio's own keys are named while the first lines of an operation are up; after that they are in the pause menu.
   const radioHelp = game.messages.log.filter((l) => l.kind === 'radio').length <= 2;
@@ -64,12 +63,7 @@ export function Hud({ game, st }: { game: GullGame; st: GameState }) {
         <div className="gb-col-right">
           {st.objectives.length > 0 && (
             <div className="gb-plate gb-orders" data-hud="orders">
-              <div className="gb-orders-title">
-                <span>{st.operationTitle}</span>
-                <span>
-                  {done}/{st.objectives.length}
-                </span>
-              </div>
+              <div className="gb-orders-title">{st.operationTitle}</div>
               {m.order && (
                 <div className={`gb-order-note gb-order-${m.order.change}`} key={m.order.id}>
                   <span aria-hidden="true">{m.order.change === 'done' ? '✓' : m.order.change === 'failed' ? '✗' : '▸'}</span> {m.order.change === 'done' ? 'Done: ' : m.order.change === 'failed' ? 'Failed: ' : 'New order: '}

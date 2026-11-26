@@ -765,7 +765,13 @@ export class GullGame {
 
   /** Say the last radio line again. */
   repeatRadio(): void {
-    if (this.messages.repeatLast() && this.messages.step(0)) this.publish({ msg: this.messages.view });
+    if (this.messages.repeatLast()) this.showMessages();
+  }
+
+  /** Advance the messages by `dt` real seconds, and hand the interface what is now on show if that has changed. */
+  private showMessages(dt = 0): void {
+    this.messages.step(dt);
+    if (this.messages.view !== this.st.msg) this.publish({ msg: this.messages.view });
   }
 
   cycleCamera(): void {
@@ -837,7 +843,7 @@ export class GullGame {
       this.titleCamera(dt);
     }
     // Messages keep real time (a slow frame does not shorten a line's reading time by much), and stop with the game.
-    if (flying && this.messages.step(Math.min(Math.max(raw, 0), 0.25))) this.publish({ msg: this.messages.view });
+    if (flying) this.showMessages(Math.min(Math.max(raw, 0), 0.25));
     this.renderFrame(dt);
     this.afterDraw(now, raw * 1000);
     this.fpsAcc.n++;
@@ -901,7 +907,7 @@ export class GullGame {
       for (const e of batch) this.onMissionEvent(e, urgent);
     }
     this.noteObjectives(m);
-    if (this.messages.step(0)) this.publish({ msg: this.messages.view });
+    this.showMessages();
   }
 
   /**
@@ -1157,7 +1163,7 @@ export class GullGame {
     this.anchorOrder = overlays.map((o) => o.id);
     // The one prompt on show is the coach's choice: a lesson, a reminder, or the mission's own prompt.
     this.messages.setPrompt(this.st.gate === 'flying' ? this.coach?.prompt() : undefined);
-    const said = this.messages.step(0);
+    this.messages.step(0);
     this.publish({
       hud: {
         speedKmh: g.speed() * 3.6,
@@ -1178,7 +1184,7 @@ export class GullGame {
       tension: m.tension,
       overlays,
       fps: this.fpsAcc.fps,
-      ...(said ? { msg: this.messages.view } : {}),
+      msg: this.messages.view,
     });
   }
 

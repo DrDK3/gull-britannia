@@ -143,7 +143,7 @@ describe('the coach', () => {
     const far = p.coach.prompt()!;
     expect(far.actions).toEqual([]);
     expect(far.text).toMatch(/yellow marker/);
-    p.flyTo(v3(m.stationPerch.pos.e, m.stationPerch.pos.n, m.stationPerch.pos.h + 5), 30, 30);
+    p.flyTo(v3(m.stationPerch.pos.e, m.stationPerch.pos.n, m.stationPerch.pos.h + 5), 20, 30);
     expect(p.coach.prompt()!.actions).toEqual(['land']);
   });
 
