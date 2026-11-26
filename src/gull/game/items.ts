@@ -6,7 +6,8 @@ import { World, add, scale, v3, type V3 } from './world';
 
 export type ItemKind = 'chip' | 'pasty' | 'crust' | 'fishhead' | 'bun' | 'dispatch' | 'document';
 
-export const ItemState = { Placed: 0, Held: 1, Loose: 2, CarriedByGuard: 3, Delivered: 4, Consumed: 5 } as const;
+/** Taken: gone for good with someone who is not a guard (the courier has his dispatch back). */
+export const ItemState = { Placed: 0, Held: 1, Loose: 2, CarriedByGuard: 3, Delivered: 4, Consumed: 5, Taken: 6 } as const;
 export type ItemStateId = (typeof ItemState)[keyof typeof ItemState];
 
 export const ITEM_KINDS: Record<ItemKind, { name: string; food?: number; bonus?: number; bonusName?: string; mission?: boolean; heldScale: number }> = {
@@ -36,6 +37,10 @@ export class Item {
   spin = 0;
   onWater = false;
   timesDropped = 0;
+  /** Somebody minds this (a pasty on its sill): a gull at it, or just away with it, is thieving. */
+  watched = false;
+  /** Something has been put on top of it: the first pull knocks that off, noisily; the second takes it. */
+  covered = false;
   /** Where it was taken from, for the HUD ("the clerk's chips"). */
   sourceLabel: string;
   /** Seconds since the start (for bobbing on the water). */
@@ -82,6 +87,15 @@ export class Item {
 
   pickUpByGuard(): void {
     this.state = ItemState.CarriedByGuard;
+    this.covered = false;
+  }
+
+  /** Someone who is not a guard walks off with it: the mission moves it with him from here on. */
+  take(): void {
+    this.state = ItemState.Taken;
+    this.covered = false;
+    this.onWater = false;
+    this.vel = v3();
   }
 
   placeHome(): void {
