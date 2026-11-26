@@ -493,6 +493,13 @@ export class Guard {
   enter(s: GuardStateId): void {
     const prev = this.state;
     this.state = s;
+    // Called away with the papers in his hand (a hit, a whistle, an alert): they go back where they belong first,
+    // rather than round the cove in his fist for the rest of the operation.
+    if (prev === GuardState.Recover && s !== GuardState.Recover && this.carrying) {
+      this.carrying.placeHome();
+      this.carrying = undefined;
+      this.recoverItem = undefined;
+    }
     switch (s) {
       case GuardState.Suspicious:
         this.notSeen = 0;

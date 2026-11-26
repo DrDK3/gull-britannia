@@ -591,6 +591,30 @@ describe('The alert ladder', () => {
   });
 });
 
+describe('Loose ends', () => {
+  it('a sentry called away while carrying the papers back puts them back first', () => {
+    const m = m1();
+    const s = m.sentry;
+    s.jumpToStep(2);
+    m.gull.spawn(v3(M1.table.e + 0.9, M1.table.n + 0.1, 3.8), -Math.PI / 2);
+    run(m, 0.2);
+    m.interact();
+    m.gull.spawn(v3(-305, 64, 3.8), 0);
+    run(m, 0.2);
+    m.interact();
+    expect(m.dispatch.state).toBe(ItemState.Loose);
+    farAway(m);
+    expect(run(m, 40, {}, () => s.carrying === m.dispatch)).toBe(true);
+    expect(m.dispatch.state).toBe(ItemState.CarriedByGuard);
+    // A drop on his tunic as he walks: he goes to scrub it, and does not take the dispatch to the pump.
+    s.onPooped('uniform');
+    expect(s.state).toBe(GuardState.Distracted);
+    expect(s.carrying).toBeUndefined();
+    expect(m.dispatch.state).toBe(ItemState.Placed);
+    expect(dist(m.dispatch.pos, m.dispatch.home.pos)).toBe(0);
+  });
+});
+
 describe('People hear each other, and the gull', () => {
   it('a sentry’s whistle puts the next man on edge', () => {
     const m = m1();
