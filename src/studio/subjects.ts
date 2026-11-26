@@ -1,11 +1,15 @@
 /**
  * What the studio can draw, and the named contact sheets. Each subject is built once for a pose and a time; with
  * ?play=1 it is advanced every frame.
+ *
+ *   gull         the player's herring gull (poses: GULL_POSES below)
+ *   gull:carry   the same, with the courier's dispatch in its bill
+ *   flock        sixteen of the cheaper gulls as one mesh (the Bomber Wing, Mission.ambient)
+ *   viewbill     the first-person bill, as the game's camera sees it
  */
 import * as THREE from 'three';
 import { GullFlock, GullModel, type GullAnim } from '../gull/view/gullModel';
 import { PAL } from '../gull/view/palette';
-import { GullModel as LegacyGull } from './legacyGull';
 
 export interface Subject {
   object: THREE.Object3D;
@@ -50,13 +54,14 @@ export const GULL_POSES: Record<string, GullPreset> = {
   eat: { anim: { eating: true, lookYaw: 0 }, place: 'ground', clock: 'run', run: 0.2 },
   call: { anim: { calling: true, lookYaw: 0 }, place: 'ground', clock: 'run', run: 0.95 },
   turn: { anim: { lookYaw: 1.1, lookPitch: -0.3, attentive: true }, place: 'ground' },
+  aircall: { anim: { ...AIR, calling: true }, clock: 'run', run: 0.95 },
 };
 
 const BASE_ANIM: GullAnim = { time: 0, airborne: false, flapPhase: 0, flapping: false, braking: false, diving: false, tumbling: false, walk: 0, walkPhase: 0, floating: false, yawRate: 0, speed: 0 };
 
 function gullSubject(poseName: string, t: number, arg = ''): Subject {
   const preset = GULL_POSES[poseName] ?? GULL_POSES.glide!;
-  const model = arg === 'old' ? (new LegacyGull() as unknown as GullModel) : new GullModel();
+  const model = new GullModel();
   const a: GullAnim = { ...BASE_ANIM, ...preset.anim };
   let run = preset.run ?? 0;
   if (Number.isFinite(t)) {

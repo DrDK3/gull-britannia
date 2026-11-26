@@ -719,7 +719,8 @@ export class MissionView {
     a.calling = false;
     a.walk = 0;
     a.walkPhase = 0;
-    m.allies.forEach((ally, i) => {
+    for (let i = 0; i < m.allies.length; i++) {
+      const ally = m.allies[i]!;
       const airborne = ally.state !== AllyState.Roost;
       // Its place is the middle of the gull; on the roost that was set a little high for the old model.
       this.at(ally, alpha, pos, airborne ? 0 : -0.08);
@@ -732,7 +733,7 @@ export class MissionView {
       a.speed = Math.hypot(ally.vel.e, ally.vel.n, ally.vel.h);
       a.diving = airborne && ally.vel.h < -6;
       flock.place(i, pos, this.yawAt(ally, ally.yaw, alpha), Math.atan2(ally.vel.h, Math.max(1, Math.hypot(ally.vel.e, ally.vel.n))) * 0.6, a, dt, 1.08);
-    });
+    }
     a.diving = false;
     // The town's gulls: whatever the mission lists, each kept in its own slot for as long as it is listed.
     const world = m.world;

@@ -60,6 +60,7 @@ export class GullModel {
   private quiet = 0;
   private beak?: THREE.Mesh;
   private watched: Record<string, unknown> | undefined;
+  private callFor = 0;
   /** How loud the watched gull is just now (its `noise`, 0 if it has none): for effects; the model draws nothing from it. */
   noise = 0;
 
@@ -82,6 +83,11 @@ export class GullModel {
    */
   watch(gull: object | undefined): void {
     this.watched = gull as Record<string, unknown> | undefined;
+  }
+
+  /** Give the long call now (head thrown back, bill wide) for `seconds`: when the gull is heard to call. */
+  call(seconds = 1.7): void {
+    this.callFor = Math.max(this.callFor, seconds);
   }
 
   /** Where the bill grips what it carries, in the scene now (call after `pose`). */
@@ -111,15 +117,16 @@ export class GullModel {
     const w = this.watched;
     const an = Object.assign(this.anim, a);
     an.roll = a.roll ?? (w ? num(w.roll) : undefined);
-    an.calling = a.calling ?? (w ? isCalling(w) : undefined);
+    this.callFor = Math.max(0, this.callFor - dt);
+    an.calling = a.calling ?? (this.callFor > 0 || (w ? isCalling(w) : false));
     an.eating = a.eating ?? (w ? (num(w.eatingTimer) ?? 0) > 0 : undefined);
     if (w) {
       this.noise = num(w.noise) ?? 0;
       // A named air state, if the flight model has one, fills in what the flags do not say.
-      const air = typeof w.airState === 'string' ? w.airState.toLowerCase() : '';
+      const air = typeof w.airState === 'string' ? w.airState : '';
       if (air && a.airborne) {
-        if (!a.braking && /brake|flare|hover|land/.test(air)) an.braking = true;
-        if (!a.diving && /dive|stoop/.test(air)) an.diving = true;
+        if (!a.braking && /brake|flare|hover|land/i.test(air)) an.braking = true;
+        if (!a.diving && /dive|stoop/i.test(air)) an.diving = true;
       }
     }
     an.idle = a.idle;
@@ -176,6 +183,7 @@ export class GullFlock {
   private readonly rig = new RigPose(GULL_RIG);
   private readonly states: GullState[] = [];
   private readonly shown: boolean[] = [];
+  private count = 0;
   private readonly root = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
   private readonly s = new THREE.Vector3();
@@ -183,6 +191,7 @@ export class GullFlock {
   constructor(readonly capacity: number) {
     this.batch = new RigBatch([{ geo: gullGeometry('flock'), copies: Math.max(1, capacity) }], rigMaterial(), 'gull-flock');
     this.mesh = this.batch.mesh;
+    this.mesh.visible = false;
     for (let i = 0; i < capacity; i++) {
       this.states.push(newGullState(0.11 + i * 0.618));
       this.shown.push(false);
@@ -198,6 +207,7 @@ export class GullFlock {
     this.root.compose(pos, this.q.setFromAxisAngle(UP, -yaw), this.s.set(scale, scale, scale));
     this.rig.solve(this.root);
     this.rig.write(this.batch.matrices, slot.bone);
+    if (!this.shown[i]) this.count++;
     this.shown[i] = true;
   }
 
@@ -207,6 +217,7 @@ export class GullFlock {
     if (!slot || !this.shown[i]) return;
     this.batch.hide(slot);
     this.shown[i] = false;
+    this.count--;
   }
 
   /** A different gull takes slot `i`: forget the old one's easing. */
@@ -214,8 +225,9 @@ export class GullFlock {
     if (this.states[i]) this.states[i] = newGullState(seed);
   }
 
-  /** After placing and hiding: send the poses to the GPU. */
+  /** After placing and hiding: send the poses to the GPU. With no gull shown, the mesh is not drawn at all. */
   commit(): void {
+    this.mesh.visible = this.count > 0;
     this.batch.commit();
   }
 

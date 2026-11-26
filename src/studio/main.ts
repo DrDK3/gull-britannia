@@ -6,19 +6,23 @@
  *   http://127.0.0.1:5310/studio.html?show=gull&pose=flap&t=0.3&view=side
  *
  * Address parameters:
- *   show   what to draw: see SUBJECTS in subjects.ts (gull, flockgull, soldier, borovsky, …, prop:table, vfx:splat)
+ *   show   what to draw: see SUBJECTS in subjects.ts (gull, gull:carry, flock, viewbill)
  *   pose   its pose or animation (gull: glide, flap, bank, brake, dive, tumble, stand, walk, look, shuffle, preen,
- *          stretch, float, eat, call; people: any `anim` the game uses)
+ *          stretch, float, eat, call, turn)
  *   t      animation time (s), or the phase of a cycle (0…1) for flap and walk
  *   view   front | back | side | side2 | three | rear | top | below | chase | far ("30 m away") | close
  *   bg     ground: neutral (default) | white (a whitewashed wall behind, to check the gull reads) | slate | water
- *   sheet  a named contact sheet (see SHEETS), or cells written out: sheet=gull:glide:three;gull:flap@0.3:side
+ *   sheet  a named contact sheet (see SHEETS: gull-views, gull-air, gull-ground, gull-flap), or cells written out as
+ *          show|pose@t|view separated by semicolons: sheet=gull|glide|three;gull|flap@0.3|side
  *   cols   columns in a sheet
+ *   light  game for the game's own sky as the environment map (slower to start); otherwise a quick stand-in
  *   play   1 to run the clock (a real browser; screenshots want a still)
  *
  * It prints the draw calls and triangles of the last frame (also window.__studio, for scripts).
  */
 import * as THREE from 'three';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { RIG_WRAP } from '../gull/view/rig';
 import { SHEETS, makeSubject, type Subject } from './subjects';
 
 declare global {
@@ -72,16 +76,46 @@ stage.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const SKY = new THREE.Color(0xaebfca);
 scene.background = SKY;
-// The game's fair June day near noon (gullScene.ts applyWeather): a warm sun, and the sky's light from above.
-// The sky's environment map is stood in for by a little more hemisphere light, to keep this page quick.
+// The game's fair June day near noon (gullScene.ts applyWeather, 'fair' sky): a warm sun at 2.4, a hemisphere light
+// at 0.46 and the sky itself as an environment map at 0.49. By default the environment map is stood in for by more
+// hemisphere light (matched by eye to light=game), which keeps this page quick; light=game builds the real one.
+const GAME_LIGHT = q.get('light') === 'game';
 const sunDir = new THREE.Vector3(-0.42, 0.78, -0.46).normalize();
-const sun = new THREE.DirectionalLight(new THREE.Color(1, 0.95, 0.88), 2.4);
+const sun = new THREE.DirectionalLight(new THREE.Color(1, 0.95, 0.88), 2.41);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.normalBias = 0.02;
 sun.shadow.bias = -0.0004;
 scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight(new THREE.Color(0.86, 0.9, 0.96), new THREE.Color(0.36, 0.34, 0.26), 0.85));
+if (GAME_LIGHT) {
+  const hemi = new THREE.HemisphereLight(new THREE.Color(0.865, 0.855, 0.84), new THREE.Color(0.3, 0.29, 0.2), 0.46);
+  scene.add(hemi);
+  const sky = new Sky();
+  sky.scale.setScalar(20000);
+  const u = sky.material.uniforms;
+  u['turbidity']!.value = 4.8;
+  u['rayleigh']!.value = 1.385;
+  u['mieCoefficient']!.value = 0.004;
+  u['mieDirectionalG']!.value = 0.8;
+  u['sunPosition']!.value.copy(sunDir);
+  const gain = { value: 0.45 };
+  sky.material.onBeforeCompile = (shader) => {
+    shader.uniforms.uSkyGain = gain;
+    shader.fragmentShader = shader.fragmentShader.replace('void main() {', 'uniform float uSkyGain;\nvoid main() {').replace('#include <tonemapping_fragment>', 'gl_FragColor.rgb *= uSkyGain;\n#include <tonemapping_fragment>');
+  };
+  const disc = u['showSunDisc'];
+  if (disc) disc.value = 0;
+  const skyScene = new THREE.Scene();
+  skyScene.add(sky);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(skyScene, 0.02).texture;
+  scene.environmentIntensity = 0.49;
+  pmrem.dispose();
+} else {
+  scene.add(new THREE.HemisphereLight(new THREE.Color(0.7, 0.82, 1.0), new THREE.Color(0.5, 0.56, 0.64), 1.9));
+  // The models' own share of sky light (rig.ts) is set for the game's dimmer hemisphere light: scale it to this one.
+  RIG_WRAP.value *= 0.46 / 1.9;
+}
 
 const GROUNDS: Record<string, number> = { neutral: 0x8f958c, white: 0xb9b5aa, slate: 0x56606a, water: 0x4d7c84 };
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: GROUNDS[BG] ?? GROUNDS.neutral, roughness: 0.95 }));

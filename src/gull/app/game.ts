@@ -852,6 +852,7 @@ export class GullGame {
         break;
       case 'sfx':
         this.audio.play(e.name, e.at, e.gain ?? 0, e.rate ?? 1);
+        if (!e.at && (e.name === 'squawk' || e.name === 'flock')) this.model.call(); // handoff: art. The gull is seen to give the call that is heard.
         break;
       case 'loop':
         this.audio.loop(e.name, e.on, e.gain ?? 0);

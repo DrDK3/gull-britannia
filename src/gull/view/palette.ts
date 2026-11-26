@@ -6,12 +6,13 @@
  * ("Kommandatura Dartmouth"), drawn on caps, the lectern and the bunting.
  */
 export const PAL = {
-  // The herring gull (Larus argentatus argenteus, adult, summer).
+  // The herring gull (Larus argentatus argenteus, adult, summer). The mantle is a shade darker than the bird's: under
+  // the game's bright sky light the true pale grey reads as white.
   gullWhite: 0xf7f6f0,
   gullShade: 0xdde2e6,
-  mantle: 0xa9b3be,
-  mantleDark: 0x8f9aa7,
-  mantleEdge: 0xc3cbd3,
+  mantle: 0x8a95a4,
+  mantleDark: 0x74818f,
+  mantleEdge: 0xa9b4c2,
   wingUnder: 0xe9ecee,
   primary: 0x1c1d21,
   bill: 0xf3c02b,

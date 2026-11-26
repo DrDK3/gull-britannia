@@ -135,7 +135,7 @@ const PRIMARY_BANDS: readonly (readonly Band[])[] = [
   [[0.3, G], [0.7, K], [0.81, W], [0.94, K], [1, W]],
   [[0.2, K], [0.64, K], [0.83, W], [0.95, K], [1, W]],
 ];
-const SECONDARY_BANDS: readonly Band[] = [[0.84, G], [1, W]];
+const SECONDARY_BANDS: readonly Band[] = [[0.88, G], [1, W]];
 
 const COL = new THREE.Color();
 const under = (c: number) => (c === G ? PAL.wingUnder : c === K ? 0x3a3d45 : c);
@@ -293,7 +293,7 @@ export function buildGullGeometry(detail: GullDetail = 'hero'): RigGeometry<Gull
         if (ny < -0.25) return ax > 0.5 ? 0x4a4d55 : PAL.wingUnder;
         if (ax > 0.53) return PAL.primary;
         const { le } = plan(Math.min(ax, 0.49));
-        return z < le + 0.014 && ax < 0.47 ? PAL.gullWhite : undefined;
+        return z < le + 0.01 && ax < 0.47 ? PAL.gullWhite : undefined;
       },
     });
 
@@ -682,8 +682,9 @@ export function poseGull(pose: RigPose<GullBone>, st: GullState, a: GullAnim, pi
     pose.rot(shank, shankRot, 0, 0);
     pose.rot(foot, flat, 0, 0);
     // Toes closed when tucked; and nothing shows below the waterline.
-    const toes = mix(0.45, 1, st.legs);
-    pose.scale(foot, toes, 1, 1);
+    const toes = mix(0.4, 1, st.legs);
+    const drawnIn = mix(0.7, 1, st.legs);
+    pose.scale(foot, toes * drawnIn, drawnIn, drawnIn);
     if (st.float > 0.5) pose.scale(leg, 0.0001);
   }
 
@@ -737,8 +738,9 @@ export function poseGull(pose: RigPose<GullBone>, st: GullState, a: GullAnim, pi
   }
   if (st.call > 0.01) {
     // The long call: bow, then the head thrown up and back, bill wide, a cry on each beat.
-    const bow = 1 - sstep(0.2, 0.55, st.callT);
-    const thrown = sstep(0.3, 0.75, st.callT);
+    // (On the wing the head only lifts: it has to see where it is going.)
+    const bow = (1 - sstep(0.2, 0.55, st.callT)) * (1 - st.air);
+    const thrown = sstep(0.3, 0.75, st.callT) * (1 - st.air * 0.65);
     neckPitch += st.call * (-bow * 0.5 + thrown * 0.55);
     headAim += st.call * (-bow * 0.8 + thrown * 1.15);
     jaw += st.call * (0.18 + thrown * (0.38 + Math.max(0, Math.sin(st.callT * TAU * 3.6)) * 0.22));
