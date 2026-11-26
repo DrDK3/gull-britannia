@@ -5,7 +5,7 @@ import globals from 'globals';
 const PURE_GAME_GLOBALS = ['window', 'document', 'performance', 'requestAnimationFrame', 'localStorage', 'navigator'];
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules', 'out', 'test-results', 'playwright-report', 'public', 'research_notes', 'reports'] },
+  { ignores: ['dist', 'node_modules', 'out', 'test-results', 'playwright-report', 'public', 'research_notes', 'reports', '.claude'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -5,6 +5,8 @@
  * Everything that the view or the sound needs to hear about (Mother on the radio, a toast, a banner, a sound, a splat)
  * is queued in `events` for the controller to drain each frame. DOM-free.
  */
+import type { ActionId } from './actions';
+import type { AmbientGull } from './ambient';
 import { DROP_IMPACT, Gull, Mode, POOP_GRAVITY, type GullControls, type GullHost, type GullProfile, type Perch } from './gull';
 import { Guard, GuardState, type GuardHost, type GuardStateId } from './guard';
 import { Item, ItemState, type ItemKind } from './items';
@@ -175,6 +177,8 @@ export abstract class Mission implements GullHost, GuardHost {
   marchers: Marcher[] = [];
   /** The Bomber Wing (Mission 2). */
   allies: AllyGull[] = [];
+  /** The town's other gulls (ambient.ts): the view draws whatever is here. */
+  ambient: AmbientGull[] = [];
   poops: Poop[] = [];
   thrown: Thrown[] = [];
   events: MissionEvent[] = [];
@@ -977,6 +981,28 @@ export abstract class Mission implements GullHost, GuardHost {
   }
 
   /** G: signal. */
+  /**
+   * A press of one of the player's actions (actions.ts, kind 'press'). The input layer sends every press here, so a
+   * mission can answer a new action by overriding onPress without the application knowing about it.
+   */
+  press(action: ActionId): void {
+    switch (action) {
+      case 'interact':
+        this.interact();
+        break;
+      case 'eat':
+        this.eat();
+        break;
+      case 'signal':
+        this.signal();
+        break;
+      default:
+        if (this.running) this.onPress(action);
+    }
+  }
+
+  protected onPress(_action: ActionId): void {}
+
   signal(): void {
     if (!this.running) return;
     if (!this.onSignal()) this.sfx('squawk', undefined, -2, 0.95 + this.rng.next() * 0.15);
