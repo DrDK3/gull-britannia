@@ -135,8 +135,8 @@ export const LESSONS: Record<string, Lesson[]> = {
     {
       id: 'steer',
       air: true,
-      text: '{look} steers. Look around, then face the yellow marker.',
-      nudge: '{look} steers. The yellow marker is the station roof: face it.',
+      text: 'Steer with {look}. Look around, then face the yellow marker.',
+      nudge: 'Steer with {look}. The yellow marker is the station roof: face it.',
       // The gull starts out facing the marker: the lesson is to have turned the view and brought it back.
       done: (_m, s) => s.turned > 0.5 && s.onMarker > 0.4,
     },

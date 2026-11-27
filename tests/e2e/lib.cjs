@@ -43,9 +43,28 @@ function tally() {
   };
 }
 
-const waitGate = (page, gate, ms = 20000) => page.waitForFunction((g) => window.__gull.game.state.gate === g && window.__gull.game.state.screen === 'playing', gate, { timeout: ms, polling: 50 }).then(() => true, () => false);
-const waitScreen = (page, s, ms = 30000) => page.waitForFunction((x) => window.__gull.game.state.screen === x, s, { timeout: ms, polling: 50 }).then(() => true, () => false);
-const waitFor = (page, fn, arg, ms = 30000) => page.waitForFunction(fn, arg, { timeout: ms, polling: 50 }).then(() => true, () => false);
+/**
+ * Wait until `fn(arg)`, run in the page, gives something truthy; that value, or false after `ms`.
+ *
+ * The page is asked from here, every few tens of milliseconds, with page.evaluate. (page.waitForFunction polls from
+ * timers inside the page, and on the CI runner those stopped answering once axe had opened and closed its own page
+ * beside this one: the button was there, the page said so when asked, and the wait still ran out.)
+ */
+async function waitFor(page, fn, arg, ms = 30000, every = 40) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await page.evaluate(fn, arg).catch((e) => {
+      // A page that is between documents has nothing to ask yet.
+      if (/context was destroyed|navigation|Target closed/i.test(e.message)) return undefined;
+      throw e;
+    });
+    if (v) return v;
+    if (Date.now() > end) return false;
+    await new Promise((r) => setTimeout(r, every));
+  }
+}
+const waitGate = (page, gate, ms = 20000) => waitFor(page, (g) => window.__gull.game.state.gate === g && window.__gull.game.state.screen === 'playing', gate, ms);
+const waitScreen = (page, s, ms = 30000) => waitFor(page, (x) => window.__gull.game.state.screen === x, s, ms);
 const click = (page, text) => page.click(`button:has-text("${text}")`, { timeout: 20000 });
 
 /**
@@ -54,24 +73,24 @@ const click = (page, text) => page.click(`button:has-text("${text}")`, { timeout
  * what a player waits for. The page itself answers at once: it is only the drawing that is slow.)
  */
 async function clickNow(page, text, ms = 90000) {
-  const h = await page
-    .waitForFunction(
-      (t) => {
-        const b = [...document.querySelectorAll('button')].find((el) => el.textContent.includes(t) && !el.disabled);
-        if (!b) return null;
-        b.scrollIntoView({ block: 'nearest' });
-        const r = b.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-      },
-      text,
-      { timeout: ms, polling: 20 },
-    )
-    .catch(async (e) => {
-      // Say what was on the page instead: a bare timeout tells nothing.
-      const seen = await page.evaluate(() => ({ screen: window.__gull?.game.state.screen, gate: window.__gull?.game.state.gate, visible: document.visibilityState, buttons: [...document.querySelectorAll('button')].map((b) => b.textContent.trim().slice(0, 30)) })).catch(() => 'the page did not answer');
-      throw new Error(`no button "${text}" to click after ${ms} ms: ${JSON.stringify(seen)} (${e.message.split('\n')[0]})`);
-    });
-  const at = await h.jsonValue();
+  const at = await waitFor(
+    page,
+    (t) => {
+      const b = [...document.querySelectorAll('button')].find((el) => el.textContent.includes(t) && !el.disabled);
+      if (!b) return null;
+      b.scrollIntoView({ block: 'nearest' });
+      const r = b.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    },
+    text,
+    ms,
+    20,
+  );
+  if (!at) {
+    // Say what was on the page instead: a bare timeout tells nothing.
+    const seen = await page.evaluate(() => ({ screen: window.__gull?.game.state.screen, gate: window.__gull?.game.state.gate, visible: document.visibilityState, buttons: [...document.querySelectorAll('button')].map((b) => b.textContent.trim().slice(0, 30)) })).catch(() => 'the page did not answer');
+    throw new Error(`no button "${text}" to click after ${ms} ms: ${JSON.stringify(seen)}`);
+  }
   await page.mouse.click(at.x, at.y);
 }
 
