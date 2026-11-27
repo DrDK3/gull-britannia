@@ -5,7 +5,7 @@
 //
 //   node tests/e2e/a11y.e2e.cjs <url>
 const axe = require('@axe-core/playwright');
-const { launch, openGame, tally, waitGate, waitScreen, waitFor, clickNow } = require('./lib.cjs');
+const { launch, openGame, tally, waitGate, waitScreen, waitFor, clickNow, drawn } = require('./lib.cjs');
 
 const AxeBuilder = axe.AxeBuilder || axe.default || axe;
 const url = process.argv[2] || 'http://127.0.0.1:4173/';
@@ -23,6 +23,8 @@ const { check, finish } = tally();
   };
   const shown = (sel) => waitFor(page, (s) => !!document.querySelector(s), sel, 15000);
 
+  // The title's first frames are being drawn: let them pass, so that nothing below waits on them.
+  await drawn(page, 2);
   await scan('title');
   await clickNow(page, 'Settings');
   await shown('.gb-settings');

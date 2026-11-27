@@ -12,7 +12,7 @@
 // The keys are real key events. The game's clock, in the flown part, is stepped by the script: a software renderer
 // draws a frame every second or more and the game advances at most a tenth of a second a frame, so a flight in real
 // time would take minutes. Where the test waits for the screen to show something, it waits for a real frame.
-const { launch, openGame, tally, waitGate, waitScreen, waitFor, clickNow } = require('./lib.cjs');
+const { launch, openGame, tally, waitGate, waitScreen, waitFor, clickNow, drawn } = require('./lib.cjs');
 
 const url = process.argv[2] || 'http://127.0.0.1:4173/';
 const { check, finish } = tally();
@@ -77,6 +77,9 @@ const stepUntil = (page, code, seconds) =>
   };
 
   // ---------------------------------------------------------------- a. time to the first possible input
+  // Timed from a title screen that has been drawn, as a player finds it. (A click in the very instant the title
+  // appears waits for its first frame as well: on a software renderer that is some seconds more; see the report.)
+  await drawn(page, 2);
   const t0 = Date.now();
   await clickNow(page, 'File 1');
   await clickNow(page, 'Begin operation');

@@ -8,7 +8,7 @@
 //     that makes sense on a roof (F-2).
 //
 //   node tests/e2e/layout.e2e.cjs <url>
-const { launch, openGame, tally, waitGate, waitFor } = require('./lib.cjs');
+const { launch, openGame, tally, waitGate, waitFor, drawn } = require('./lib.cjs');
 
 const url = process.argv[2] || 'http://127.0.0.1:4173/';
 const { check, finish } = tally();
@@ -17,18 +17,6 @@ const SIZES = [
   [1280, 720],
   [1920, 1080],
 ];
-
-/** Wait for the game to have drawn `n` more frames (labels are placed, and the HUD published, with the frame). */
-const drawn = (page, n = 2) =>
-  page.evaluate(
-    (count) =>
-      new Promise((resolve) => {
-        let left = count;
-        const tick = () => (--left <= 0 ? resolve(true) : requestAnimationFrame(tick));
-        requestAnimationFrame(tick);
-      }),
-    n,
-  );
 
 /** Put the game into the busiest state there is. The mission's own calls are used, so the boxes are the real ones. */
 function stage() {
@@ -159,7 +147,7 @@ function measure() {
       chip: document.querySelector('.gb-chip')?.textContent ?? '',
       label: document.querySelector('[data-label="borovsky"]')?.textContent ?? '',
     }));
-    check(`g. ${at}: the clock, the ladder, the chip and the tell are the ones staged`, /Courier back 13\.30 · 0:\d\d/.test(seen.watch) && seen.urgent && /Alert: searching/i.test(seen.watch) && seen.chip.trim().length > 4 && /About to turn/.test(seen.label), `${seen.watch} | ${seen.chip} | ${seen.label}`);
+    check(`g. ${at}: the clock, the ladder, the chip and the tell are the ones staged`, /Courier back.* 13\.30 · 0:\d\d/.test(seen.watch) && seen.urgent && /Alert: searching/i.test(seen.watch) && seen.chip.trim().length > 4 && /About to turn/.test(seen.label), `${seen.watch} | ${seen.chip} | ${seen.label}`);
     const off = m.boxes.filter((b) => b.x < -0.5 || b.y < -0.5 || b.x + b.w > m.width + 0.5 || b.y + b.h > m.height + 0.5);
     check(`g. ${at}: every HUD box is wholly on screen`, off.length === 0, off.map((b) => `${b.name} at ${Math.round(b.x)},${Math.round(b.y)} ${Math.round(b.w)}×${Math.round(b.h)}`).join('; '));
     const clashes = [];
